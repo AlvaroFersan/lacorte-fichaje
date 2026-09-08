@@ -1,0 +1,8 @@
+# Solo para probar en un PC con Docker Hub. El NAS no usa este archivo.
+# docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+
+services:
+  fichaje:
+    build: .
+    image: lacorte-fichaje:local
+    pull_policy: never

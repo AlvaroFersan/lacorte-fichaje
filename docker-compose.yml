@@ -1,0 +1,43 @@
+# La Corte · lo que lee el NAS (Container Manager / GitHub).
+# No hace falta .bat ni .env en el repo: el secreto de sesión se guarda en data/.
+
+name: lacorte
+
+services:
+  fichaje:
+    image: ${IMAGEN:-ghcr.io/alvaroferan/lacorte-fichaje:latest}
+    pull_policy: always
+    container_name: lacorte-fichaje
+    ports:
+      - "${PUERTO:-3000}:3000"
+    environment:
+      PUERTO: "3000"
+      RUTA_DB: /data/fichaje.db
+      NODE_ENV: production
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "4m"
+        max-file: "3"

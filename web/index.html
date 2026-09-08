@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>La Corte · Fichaje</title>
+  <link rel="stylesheet" href="/css/estilos.css">
+</head>
+<body>
+  <div id="login">
+    <div class="login-art">
+      <div>
+        <img class="logo-lc logo-lc-lg" src="img/la-corte.png" alt="La Corte">
+      </div>
+      <p class="tag">Fichaje y producción · Servidor local · Sin salida a internet</p>
+    </div>
+    <div class="login-form">
+      <form class="lf" id="loginForm">
+        <h1>Entrar</h1>
+        <p class="sub">Las credenciales viven en el NAS, no en el navegador.</p>
+        <div id="loginErr" class="msg msg-err hide"></div>
+        <label class="lbl" for="u">Usuario</label>
+        <div class="row"><input class="field" id="u" name="usuario" autocomplete="username" required></div>
+        <label class="lbl" for="p">Contraseña</label>
+        <div class="row"><input class="field" id="p" name="clave" type="password" autocomplete="current-password" required></div>
+        <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+        <div class="hint">
+          Primera vez: <code>alvaro</code> / <code>1234</code> · <code>jesus</code> / <code>1234</code>
+          (los dos admin). Cámbialas antes de usarlas en el estudio.
+          <div class="quicks" id="quicks"></div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="hide">
+    <aside>
+      <div class="aside-brand">
+        <img class="logo-lc" src="img/la-corte.png" alt="La Corte">
+      </div>
+      <div class="nav-spacer"></div>
+      <div class="me">
+        <div class="avatar" id="avatar">—</div>
+        <div>
+          <div class="me-name" id="meNom"></div>
+          <div class="me-role" id="meRol"></div>
+        </div>
+      </div>
+    </aside>
+    <main>
+      <div class="topbar">
+        <div>
+          <h1>Servidor en marcha</h1>
+          <p class="sub">Los datos ya no se pierden al recargar: están en SQLite, en el NAS.</p>
+        </div>
+      </div>
+      <div class="pad">
+        <div class="banner" id="banner">
+          Esto es el cimiento. El prototipo visual (calendario, árbol, tablero) sigue en
+          <a href="/prototipo/">/prototipo</a> como referencia. El siguiente paso es
+          conectarlo a estas rutas para que deje de vivir solo en la memoria del navegador.
+        </div>
+        <div class="grid" id="tiles"></div>
+        <div class="card" style="margin-top:12px">
+          <h2>Qué hay hecho</h2>
+          <p class="cap">Para que puedas ejecutar la app en local y, luego, en el NAS.</p>
+          <ul class="lista">
+            <li>Contenedor Docker con Node. Un solo comando: <code>docker compose up -d</code>.</li>
+            <li>Base SQLite en <code>data/fichaje.db</code>. Se copia con <code>scripts/copia.sh</code>.</li>
+            <li>Acceso con cookie firmada, contraseñas bcrypt y TOTP en el servidor.</li>
+            <li>Rutas listas: acceso, usuarios, proyectos, escenas, horas e informes.</li>
+          </ul>
+          <div class="dots">
+            <span class="dot" style="background:var(--s1)" title="Gestión"></span>
+            <span class="dot" style="background:var(--s2)" title="Asistencia"></span>
+            <span class="dot" style="background:var(--s3)" title="Montaje"></span>
+          </div>
+          <div class="acciones">
+            <a class="btn" href="/prototipo/">Abrir el prototipo visual</a>
+            <a class="btn" href="/api/salud">Estado del servidor</a>
+            <button class="btn" type="button" id="btnSalir">Salir</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="/js/app.js"></script>
+</body>
+</html>

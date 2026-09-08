@@ -1,0 +1,2 @@
+# Carpeta de la base SQLite. El contenedor la monta en /data.
+# No subas fichaje.db al git.
