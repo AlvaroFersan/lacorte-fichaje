@@ -51,14 +51,15 @@ se vuelve a crear esa base limpia.
 
 ## Montar en el NAS
 
-Como Wekan: copias un YAML y Container Manager se descarga la imagen.
+Synology no baja imágenes de GitHub (`ghcr.io`). Hay que crear el **proyecto
+desde Git** (no pegar el YAML viejo). Guía: **[docs/NAS.md](docs/NAS.md)**.
 
-1. En File Station crea `docker/lacorte/data`.
-2. Container Manager → **Proyecto** → **Crear** → **Configuraciones de YAML**.
-3. Pega el contenido de **[NAS.yml](NAS.yml)** (está también en [docs/NAS.md](docs/NAS.md)).
-4. Inicia. En el navegador: `http://IP-DEL-NAS:3000`.
+URL:
 
-Las cuentas las da el administrador del estudio; no se publican aquí.
+`https://github.com/AlvaroFersan/lacorte-fichaje.git`
+
+Rama `main`. Luego: `http://IP-DEL-NAS:3000`.
+Las cuentas las da el administrador del estudio.
 
 ---
 

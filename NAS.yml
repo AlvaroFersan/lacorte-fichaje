@@ -1,10 +1,9 @@
-# Copia TODO este archivo en el NAS:
-# Container Manager → Proyecto → Crear → pega en «Configuraciones de YAML».
-# Antes, en File Station, crea la carpeta: docker/lacorte/data
+# Pega esto en Container Manager DESPUÉS de tener la imagen en el NAS
+# (proyecto desde Git, o el Programador de tareas). No usa ghcr.io.
 
 services:
   fichaje:
-    image: ghcr.io/alvaroferan/lacorte-fichaje:latest
+    image: lacorte-fichaje:local
     container_name: La-Corte
     hostname: lacorte
     security_opt:
