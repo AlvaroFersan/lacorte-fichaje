@@ -9,6 +9,9 @@ Esto es el cimiento: servidor Node, base SQLite y acceso de verdad
 (contraseñas bcrypt, sesiones, TOTP). El prototipo visual sigue en
 `prototipo/` como especificación viva.
 
+**Licencia:** se puede descargar y usar en el NAS del estudio. No se puede
+modificar, vender ni redistribuir. Texto completo en `LICENSE`.
+
 ---
 
 ## Qué necesitas en el ordenador (para probar ahora)

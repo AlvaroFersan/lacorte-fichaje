@@ -2,6 +2,7 @@
   "name": "lacorte-fichaje",
   "version": "0.1.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Fichaje y producción de La Corte Editores. Servidor local para el NAS.",
   "main": "server/index.js",
   "scripts": {
