@@ -51,15 +51,14 @@ se vuelve a crear esa base limpia.
 
 ## Montar en el NAS
 
-Guía completa, paso a paso (Synology y QNAP): **[docs/NAS.md](docs/NAS.md)**.
+Como Wekan: copias un YAML y Container Manager se descarga la imagen.
 
-Resumen: en Container Manager (o Container Station) crea un **proyecto desde Git**
-con esta URL:
+1. En File Station crea `docker/lacorte/data`.
+2. Container Manager → **Proyecto** → **Crear** → **Configuraciones de YAML**.
+3. Pega el contenido de **[NAS.yml](NAS.yml)** (está también en [docs/NAS.md](docs/NAS.md)).
+4. Inicia. En el navegador: `http://IP-DEL-NAS:3000`.
 
-`https://github.com/AlvaroFersan/lacorte-fichaje.git`
-
-Rama `main`. Tiene que leer `docker-compose.yml`. Luego, en un PC de la oficina:
-`http://IP-DEL-NAS:3000`.
+Las cuentas las da el administrador del estudio; no se publican aquí.
 
 ---
 

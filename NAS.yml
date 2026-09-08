@@ -1,0 +1,28 @@
+# Copia TODO este archivo en el NAS:
+# Container Manager → Proyecto → Crear → pega en «Configuraciones de YAML».
+# Antes, en File Station, crea la carpeta: docker/lacorte/data
+
+services:
+  fichaje:
+    image: ghcr.io/alvaroferan/lacorte-fichaje:latest
+    container_name: La-Corte
+    hostname: lacorte
+    security_opt:
+      - no-new-privileges:true
+    user: 1026:100
+    ports:
+      - 3000:3000
+    volumes:
+      - /volume1/docker/lacorte/data:/data:rw
+    environment:
+      - PUERTO=3000
+      - RUTA_DB=/data/fichaje.db
+      - NODE_ENV=production
+      - COOKIE_SECURE=0
+    restart: on-failure:5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
