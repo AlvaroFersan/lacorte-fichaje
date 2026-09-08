@@ -52,8 +52,8 @@ vuelve a crear limpia.
 ## Montar en el NAS
 
 Como Wekan: Container Manager → Proyecto → Crear → **Configuraciones de YAML**.
-Pega el contenido de **[NAS.yml](NAS.yml)**. Guía paso a paso:
-**[docs/NAS.md](docs/NAS.md)**.
+Pega el contenido de **[NAS.yml](NAS.yml)**. No elijas «desde Git»: DSM
+intentaría un Dockerfile y falla. Guía: **[docs/NAS.md](docs/NAS.md)**.
 
 Luego: `http://IP-DEL-NAS:3001`.
 
@@ -69,8 +69,7 @@ termine en verde antes de recrear el proyecto.
 | Memoria del proyecto | `docs/PROYECTO-LA-CORTE-FICHAJE.md` |
 | Interfaz | `prototipo/` (la sirve Node en `/`) |
 | Servidor y API | `server/` |
-| YAML para pegar en el NAS | `NAS.yml` |
-| Compose si el NAS construye desde Git | `docker-compose.yml` |
+| YAML para pegar en el NAS | `NAS.yml` (el mismo que `docker-compose.yml`) |
 | Base de datos | `data/fichaje.db` (no va al git) |
 | Copia de seguridad | `scripts/copia.sh` (PC) y `scripts/copia-nas.sh` (NAS) |
 
