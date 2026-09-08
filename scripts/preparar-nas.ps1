@@ -28,5 +28,6 @@ if ($texto -match 'cambia-esta-frase-por-una-aleatoria-larga') {
 }
 
 Write-Host 'Listo para probar en este PC.'
-Write-Host 'El NAS entra por GitHub + docker-compose.yml (docs/NAS.md).'
+Write-Host 'El NAS pega NAS.yml en Container Manager (docs/NAS.md).'
 Write-Host 'Navegador local: http://localhost:3000'
+Write-Host 'NAS (Docker): http://IP-DEL-NAS:3001'

@@ -31,11 +31,40 @@ function exigirAdmin(req, res, next) {
   next();
 }
 
-/** Un usuario normal solo ve sus horas. El admin ve las de todo el equipo. */
+/** Un usuario normal solo ve sus horas. El admin ve las de todo el equipo
+ *  en los proyectos que él mismo puede ver: un proyecto sin compartir
+ *  no lo ve nadie más, ni el administrador. */
 function puedeVerHorasDe(actor, usuarioId) {
   if (!actor) return false;
   if (actor.rol === 'admin') return true;
   return Number(actor.id) === Number(usuarioId);
 }
 
-module.exports = { publico, exigirSesion, exigirAdmin, puedeVerHorasDe };
+function idsProyectosVisibles(actor, base) {
+  if (!actor) return [];
+  const dbx = base || require('../db').get();
+  return dbx.prepare(`
+    SELECT p.id FROM proyectos p WHERE p.dueno = ?
+    UNION
+    SELECT proyecto_id AS id FROM proyecto_equipo WHERE usuario_id = ?
+  `).all(actor.id, actor.id).map(r => r.id);
+}
+
+function puedeVerProyecto(actor, proyecto, base) {
+  if (!actor || proyecto == null) return false;
+  const dbx = base || require('../db').get();
+  const p = typeof proyecto === 'object'
+    ? proyecto
+    : dbx.prepare('SELECT * FROM proyectos WHERE id = ?').get(Number(proyecto));
+  if (!p) return false;
+  if (Number(p.dueno) === Number(actor.id)) return true;
+  const fila = dbx.prepare(
+    'SELECT 1 FROM proyecto_equipo WHERE proyecto_id = ? AND usuario_id = ?'
+  ).get(p.id, actor.id);
+  return !!fila;
+}
+
+module.exports = {
+  publico, exigirSesion, exigirAdmin, puedeVerHorasDe,
+  idsProyectosVisibles, puedeVerProyecto
+};

@@ -2,7 +2,7 @@
 
 **Documento de memoria del proyecto.** Súbelo como conocimiento de un proyecto de Claude
 (o pégalo en sus instrucciones) para no tener que volver a contar el contexto.
-Última actualización: 7 de septiembre de 2026.
+Última actualización: 8 de septiembre de 2026.
 
 ---
 
@@ -75,6 +75,7 @@ No hace falta volver a discutirlas salvo que yo lo pida.
 | Dependencias | **Ninguna externa.** Todo escrito a mano para funcionar sin internet |
 | Estética | Identidad de La Corte (blanco y negro) sobre usabilidad tipo Clockify/Wrike |
 | Idioma | Toda la interfaz en español |
+| Reloj | **El del equipo.** España, México y Colombia: hoy, la semana y las horas salen del sistema donde abres la app. No hay huso fijo ni fechas en UTC |
 
 ### Por qué sin dependencias externas
 
@@ -85,19 +86,22 @@ la criptografía están escritos a mano en el propio archivo.
 
 ---
 
-## 4. Estado actual: el prototipo
+## 4. Estado actual
 
-Archivo único autocontenido: `lacorte-fichaje-prototipo.html` (~188 KB). Se abre con doble
-clic, sin instalar nada. **Los datos viven en memoria: al recargar, vuelve al estado inicial.**
+La interfaz vive en `prototipo/`. Node la sirve en `/` y guarda en SQLite
+(`data/fichaje.db`). En el NAS: Docker, volumen `/volume1/docker/lacorte/data`,
+puerto **3001**. YAML para pegar: `NAS.yml`. Guía: `docs/NAS.md`.
 
-Las cuentas de acceso las da el administrador del estudio. No se publican
-en este documento. Hay botones de acceso rápido en la pantalla de entrada
-del prototipo (solo en local).
+Las cuentas las da el administrador del estudio. No se publican aquí.
+Tema claro / oscuro / sistema en **Mi cuenta**. Chat entre personas del
+estudio, con aviso abajo a la derecha al llegar un mensaje.
 
 ### 4.1 Acceso y seguridad — hecho
 
-- Contraseñas con **sal aleatoria + SHA-256 iterado 12.000 veces**. Solo se guarda el hash.
-  En el panel de admin se ve el hash, no la contraseña.
+- En el **servidor**: contraseñas con **bcrypt**. El hash no se puede leer.
+  El prototipo en `file://` aún tiene un hash SHA de respaldo si el NAS no
+  responde; el login real va siempre contra `/api/acceso`.
+- En el panel de admin se ve el hash, no la contraseña.
 - **Restablecimiento**: la persona avisa desde la pantalla de acceso → al admin le sale un
   contador → genera un código `LC-XXXX-XXXX` válido 24 h → se lo da en mano → la persona
   elige su contraseña. El admin nunca la conoce.
@@ -136,25 +140,36 @@ del prototipo (solo en local).
 Tres vistas sobre los mismos datos, con las mismas columnas:
 
 - **Árbol** (por defecto): carpetas anidadas por proyecto con numeración de filas, plegado
-  a cualquier nivel y contadores. Estructura sembrada con vuestra nomenclatura:
-  `00_XXX_ASISTENCIA`, `01_XXX_DOCUMENTOS` (con subcarpetas Documentos, Guion, Planes de
-  trabajo, Crew list) y `02_XXX_ESCENAS`.
-- **Agrupada**: agrupar por bloque, estado, responsable o proyecto; ordenar por columna.
-- **Tablero**: kanban de cuatro columnas con arrastre entre estados.
-- **Mis tareas**: lo asignado a cada uno, de todos los proyectos.
+  a cualquier nivel y contadores. Al crear un proyecto nace la estructura del estudio,
+  sin el código del proyecto en el nombre: `00_ASISTENCIA`, `01_DOCUMENTOS` (con
+  Documentos, Guion, Planes de Trabajo y Crew List), `02_ESCENAS`, `03_ENTREGAS` y
+  `04_SALIDAS`.
+- **Tareas**: raíz del trabajo de Producción, con conmutador entre tabla y tablero.
+- **Tabla**: agrupar por bloque, estado, responsable o proyecto; ordenar por columna.
+- **Tablero**: kanban por proyecto con arrastre entre estados.
+- **Mis tareas**: lo asignado a cada uno, de los proyectos que puede ver.
+
+**Quién ve qué.** Un proyecto sin compartir lo ve solo su dueño, ni siquiera
+un administrador. Al invitar, al dueño le sigue saliendo en **Proyectos**; a
+quien invita, solo en **Compartido conmigo**. A cada cuenta se le crea
+**Personal**: ficha básica y una pizarra de hojas apiladas en escalera, ordenadas
+por día (hoy primero). Se pueden crear hojas nuevas; si invitas a alguien a
+Personal, también ve la pizarra. Sin la plantilla de carpetas del estudio.
 
 Además:
 
-- **Columnas configurables.** Nueve estándar (estado, responsable, prioridad, entrega,
-  subtareas, horas, bloque, proyecto, comentarios) más las que crees tú: texto, **etiqueta
+- **Columnas configurables.** Ocho estándar (estado, responsable, prioridad, entrega,
+  horas, bloque, proyecto, comentarios) más las que crees tú: texto, **etiqueta
   de lista con colores**, número, casilla sí/no y fecha. Se muestran, ocultan y borran desde
   el botón *Columnas* o el `+` de la cabecera.
 - **Edición en la propia celda**: estado (como chip de color), responsable, prioridad y
   fechas se cambian sin abrir nada.
-- **Ficha de escena** en panel lateral: notas, subtareas con casillas, comentarios,
+- **Ficha de escena** en panel lateral: notas, archivos, comentarios,
   **horas imputadas** con desglose por persona, y borrado con deshacer.
 - **Avisos**: al asignarte algo, cambiarte una fecha, mover tu escena de estado o comentar
   en ella. Campana con contador; al pulsar un aviso te lleva a la escena.
+- **Chat** del estudio (servidor): hilos entre dos personas, contador en el
+  botón, aviso emergente abajo a la derecha si el hilo no está abierto.
 
 ---
 
@@ -164,46 +179,46 @@ Ordenado por importancia para un estudio real.
 
 ### Bloqueantes para usarlo de verdad
 
-1. **Backend**. Node + SQLite en Docker, contraseñas con **bcrypt o argon2** (no el hash
-   del prototipo), TOTP validado en el servidor, sesiones con cookie firmada.
-2. **Cierre de periodo.** Hoy cualquiera puede editar sus horas de hace seis meses. El admin
+1. **Cierre de periodo.** Hoy cualquiera puede editar sus horas de hace seis meses. El admin
    debe poder cerrar el mes y que a partir de ahí solo él pueda tocar nada.
    *El registro de jornada en España obliga a conservar los registros cuatro años; conviene
    confirmarlo con vuestra asesoría antes de definir el comportamiento exacto.*
-3. **Aprobación de partes de horas.** Cada uno cierra su semana y el responsable la valida
+2. **Aprobación de partes de horas.** Cada uno cierra su semana y el responsable la valida
    antes de que entre en la facturación del proyecto.
-4. **Copias de seguridad.** La base de datos es un archivo: copia diaria con rotación.
+3. **Copias de seguridad en el programador del NAS.** El script está
+   (`scripts/copia-nas.sh`); falta programarlo en DSM.
 
 ### Mejoras del módulo Producción
 
-5. Crear carpetas desde la interfaz y **arrastrar escenas** de una carpeta a otra.
-6. Subtareas anidadas de verdad (escenas dentro de escenas), adjuntos y dependencias.
-7. Vista de **cronograma / Gantt** y filtros guardados.
-8. Formularios de solicitud, como los de Wrike.
+4. Crear carpetas desde la interfaz y **arrastrar escenas** de una carpeta a otra.
+5. Adjuntos y dependencias entre escenas.
+6. Vista de **cronograma / Gantt** y filtros guardados.
+7. Formularios de solicitud, como los de Wrike.
 
 ### Mejoras del módulo Fichaje
 
-9. Bloquear o avisar activamente de solapes al guardar, no solo marcarlos.
-10. **Tarifas por persona y por proyecto** (ahora son globales por función).
-11. **Fases del proyecto**: armado, corte largo, fine cut, picture lock, entrega.
-12. Turnos que **cruzan la medianoche** (hoy hay que partirlos en dos).
-13. **Vacaciones y ausencias.**
-14. Repasar la experiencia en móvil más allá del calendario.
+8. Bloquear o avisar activamente de solapes al guardar, no solo marcarlos.
+9. **Tarifas por persona y por proyecto** (ahora son globales por función).
+10. **Fases del proyecto**: armado, corte largo, fine cut, picture lock, entrega.
+11. Turnos que **cruzan la medianoche** (hoy hay que partirlos en dos).
+12. **Vacaciones y ausencias.**
+13. Repasar la experiencia en móvil más allá del calendario.
+14. Adjuntos de chat en el servidor (hoy viaja el nombre, no el archivo).
 
 ---
 
-## 6. Arquitectura objetivo
+## 6. Arquitectura
 
 ```
 Navegador del equipo
-        │  http://nas.oficina.local:3000
+        │  http://nas.oficina.local:3001
         ▼
 ┌───────────────────────────────┐
 │  Contenedor Docker en el NAS  │
 │  ┌─────────────────────────┐  │
 │  │ Node (Express)          │  │  API REST + sirve el frontend
 │  │  · sesiones con cookie  │  │
-│  │  · bcrypt / argon2      │  │
+│  │  · bcrypt               │  │
 │  │  · TOTP en servidor     │  │
 │  └───────────┬─────────────┘  │
 │              ▼                │
@@ -213,43 +228,35 @@ Navegador del equipo
 └───────────────────────────────┘
 ```
 
-### Estructura de carpetas propuesta
+### Estructura de carpetas
 
 ```
 lacorte-fichaje/
-├── docker-compose.yml
+├── NAS.yml                   # pegar en Container Manager (imagen ghcr)
+├── docker-compose.yml        # si el NAS construye desde Git
 ├── Dockerfile
-├── .env.example              # PUERTO, SESSION_SECRET, RUTA_DB
-├── README.md                 # instalación en el NAS, paso a paso
+├── .env.example              # solo el PC; el NAS genera session.secret
+├── README.md
 ├── data/                     # volumen persistente (NO va al repositorio)
 │   ├── fichaje.db
-│   └── copias/
+│   └── session.secret
+├── prototipo/                # interfaz que sirve Node en /
+│   ├── lacorte-fichaje-prototipo.html
+│   └── js/                   # nucleo, fichaje, produccion, puente, tema
 ├── server/
-│   ├── index.js              # arranque y middleware
-│   ├── db.js                 # esquema y migraciones
-│   ├── auth.js               # contraseñas, sesiones, TOTP, códigos
-│   ├── rutas/
-│   │   ├── acceso.js         # login, 2FA, restablecer
-│   │   ├── entradas.js       # registros de horas
-│   │   ├── proyectos.js      # proyectos, carpetas, presupuestos
-│   │   ├── tareas.js         # escenas, columnas propias, comentarios
-│   │   ├── usuarios.js       # altas, roles, política
-│   │   └── informes.js       # agregados y CSV
-│   └── lib/
-│       ├── totp.js
-│       └── permisos.js       # quién puede ver o tocar qué
-├── web/
-│   ├── index.html
-│   ├── css/estilos.css
-│   ├── js/
-│   │   ├── app.js            # arranque, navegación, módulos
-│   │   ├── comun/            # api, formato de fechas, gráficos, avisos
-│   │   ├── fichaje/          # cronómetro, calendario, informes, gestión
-│   │   └── produccion/       # árbol, tabla, tablero, ficha de escena
-│   └── assets/
-│       └── fuentes/          # Inter servida desde el propio NAS
+│   ├── index.js
+│   ├── db.js
+│   ├── auth.js
+│   ├── nucleo/               # acceso, proyectos, chat
+│   ├── fichaje/              # entradas, informes
+│   ├── produccion/           # escenas, flujos, plantilla
+│   ├── administracion/       # usuarios
+│   └── lib/                  # fechas, permisos, totp
+├── web/                      # pantalla auxiliar en /servidor
 └── scripts/
-    └── copia.sh              # respaldo diario de la base de datos
+    ├── copia.sh              # respaldo en el PC
+    ├── copia-nas.sh          # respaldo del volumen del NAS
+    └── poner-clave.js        # hash bcrypt; la clave entra por el entorno
 ```
 
 ---
@@ -263,17 +270,16 @@ Entidades y campos principales. Los nombres son orientativos.
 
 **codigos_recuperacion** — `id`, `usuario_id`, `hash`, `usado`
 
-**proyectos** — `id`, `nombre`, `cliente`, `formato` (Serie/Documental/Publicidad/
-Corporativo/Interno), `estado` (curso/entregado/pausa), `horas_presupuestadas`,
-`fecha_entrega`, `minutos_programa`, `versiones`
+**proyectos** — `id`, `nombre`, `cliente`, `formato`, `estado`, `horas_presupuestadas`,
+`fecha_entrega`, `minutos_programa`, `versiones`, `color`, `flujo_id`, **`dueno`**,
+**`personal`**, **`pizarra`** (JSON de hojas: `id`, `fecha`, `texto`). El admin no
+bypasea la visibilidad: dueño o equipo.
 
 **carpetas** — `id`, `proyecto_id`, `nombre`, `padre_id` *(anidamiento sin límite)*
 
 **escenas** — `id`, `proyecto_id`, `carpeta_id`, `titulo`, `notas`, `asignado_a`,
 `estado` (pendiente/curso/revision/hecha), `prioridad` (alta/media/baja), `fecha_entrega`,
 `creador`, `creada`
-
-**subtareas** — `id`, `escena_id`, `texto`, `hecha`
 
 **comentarios** — `id`, `escena_id`, `usuario_id`, `fecha`, `texto`
 
@@ -287,6 +293,9 @@ Corporativo/Interno), `estado` (curso/entregado/pausa), `horas_presupuestadas`,
 `descripcion`, `inicio`, `fin`
 
 **avisos** — `id`, `usuario_id`, `texto`, `escena_id`, `fecha`, `leido`
+
+**chat_mensajes** — `id`, `de`, `para`, `texto`, `adj_nom`, `adj_tipo`, `adj_tam`, `ts`, `leido`.
+El blob del adjunto aún no se guarda en el servidor.
 
 **solicitudes_password** — `id`, `usuario_id`, `fecha`, `mensaje`, `estado`
 

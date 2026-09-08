@@ -3,6 +3,7 @@
 const express = require('express');
 const db = require('../db');
 const { exigirSesion, exigirAdmin, puedeVerHorasDe } = require('../lib/permisos');
+const { partesEnDesfase } = require('../lib/fechas');
 
 const router = express.Router();
 router.use(exigirSesion);
@@ -91,14 +92,17 @@ router.get('/csv', (req, res) => {
     params.push(quien);
   }
   sql += ' ORDER BY e.inicio';
+  const desfase = req.query.desfase;
   const filas = db.get().prepare(sql).all(...params);
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lineas = ['id,inicio,fin,persona,proyecto,tipo,descripcion'];
   for (const f of filas) {
+    const a = partesEnDesfase(f.inicio, desfase);
+    const b = partesEnDesfase(f.fin, desfase);
     lineas.push([
       f.id,
-      new Date(f.inicio).toISOString(),
-      new Date(f.fin).toISOString(),
+      a.fecha + ' ' + a.hora,
+      b.fecha + ' ' + b.hora,
       esc(f.persona),
       esc(f.proyecto),
       CAT[f.categoria] || f.categoria,

@@ -346,22 +346,46 @@ let USERS = [
 let nextUserId = 3;
 const userById = id => USERS.find(u=>u.id===id);
 
-/* tarifa interna por función, en €/hora — sirve para valorar el coste del proyecto */
-const TARIFA = {gestion:45, asis:28, montaje:42};
-
 /* formato, minutos de programa entregados, versiones enviadas al cliente,
    horas presupuestadas y fecha de entrega: lo que hace evaluable un proyecto audiovisual */
 const PROYECTOS = [
   {id:1, nom:'Interno', cliente:'La Corte', formato:'Interno', estado:'curso',
-   presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0, equipo:[1,2], dueno:1, flujoId:1, pines:[]}
+   presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0, equipo:[1,2], dueno:1, flujoId:1, pines:[], personal:false, pizarra:''}
 ];
 const ESTADOS = {curso:'En curso', entregado:'Entregado', pausa:'En pausa'};
-const proyById = id => PROYECTOS.find(p=>p.id===id) || PROYECTOS[0];
-const duenoDe = p => p.dueno || 1;
+const proyById = id => PROYECTOS.find(p=>p.id===id) || {id:id||0, nom:'—', equipo:[], dueno:null, personal:false, pizarra:''};
+const duenoDe = p => (p && p.dueno != null) ? Number(p.dueno) : null;
 const esMio = p => ME && duenoDe(p)===ME.id;
 const estaEnEquipo = p => ME && (p.equipo||[]).includes(ME.id);
-const proyectosMios = () => PROYECTOS.filter(esMio);
-const proyectosCompartidos = () => PROYECTOS.filter(p => !esMio(p) && estaEnEquipo(p));
+const esPersonal = p => !!(p && (p.personal===true || p.personal===1));
+const proyectosVisibles = () => PROYECTOS.filter(p => esMio(p) || estaEnEquipo(p));
+const proyectosMios = () => proyectosVisibles().filter(esMio);
+const proyectosCompartidos = () => proyectosVisibles().filter(p => !esMio(p) && estaEnEquipo(p));
+function aseguraPersonal(uid){
+  const quien = uid != null ? +uid : (ME && ME.id);
+  if(!quien) return null;
+  let p = PROYECTOS.find(x=>esPersonal(x) && duenoDe(x)===quien);
+  if(p){
+    if(!(p.equipo||[]).includes(quien)) p.equipo = [...(p.equipo||[]), quien];
+    if(p.pizarra == null) p.pizarra = '';
+    return p;
+  }
+  const id = Math.max(0, ...PROYECTOS.map(x=>x.id), 0) + 1;
+  p = {
+    id, nom:'Personal', cliente:'—', formato:'Interno', estado:'curso',
+    presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0,
+    equipo:[quien], dueno:quien, flujoId:1, pines:[], personal:true, pizarra:''
+  };
+  PROYECTOS.push(p);
+  return p;
+}
+function recortaProyectosAjenos(){
+  if(!ME) return;
+  for(let i=PROYECTOS.length-1;i>=0;i--){
+    const p = PROYECTOS[i];
+    if(!(esMio(p) || estaEnEquipo(p))) PROYECTOS.splice(i,1);
+  }
+}
 const SLOTS = ['var(--s1)','var(--s2)','var(--s3)','var(--s4)','var(--s5)','var(--s6)','var(--s7)','var(--s8)'];
 const PALETA_PROY = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#6b3fa0','#2ec4d6','#c47a3a','#8B1E1E','#8a8a85'];
 const colorProyecto = id => {
@@ -371,9 +395,42 @@ const colorProyecto = id => {
 };
 
 const DAY = 86400000;
-const startOfDay = d => { const x=new Date(d); x.setHours(0,0,0,0); return x; };
-const HOY = startOfDay(new Date());
-const lunesDe = d => { const x = startOfDay(d); return new Date(x.getTime() - ((x.getDay()+6)%7)*DAY); };
+/* Reloj del equipo (España, México, Colombia). Nunca toISOString() para un día
+   de calendario: eso es UTC y en América mueve la fecha. Date('YYYY-MM-DD')
+   también es UTC. Un instante se guarda en ms; un día, en YYYY-MM-DD local. */
+function fechaISOLocal(d){
+  const x = d instanceof Date ? d : new Date(d == null ? Date.now() : d);
+  if(Number.isNaN(+x)) return '';
+  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+}
+function parseFechaISO(iso){
+  const m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return null;
+  return new Date(+m[1], +m[2]-1, +m[3]);
+}
+function finDelDiaISO(iso){
+  const d = parseFechaISO(iso);
+  if(!d) return null;
+  d.setHours(23,59,59,999);
+  return d;
+}
+function fDia(iso){
+  const d = parseFechaISO(iso);
+  return d ? d.toLocaleDateString('es-ES',{day:'2-digit',month:'short'}) : '';
+}
+function diasHasta(iso){
+  const fin = finDelDiaISO(iso);
+  if(!fin) return null;
+  return Math.ceil((fin - Date.now())/DAY);
+}
+function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+function hoy(){ return startOfDay(new Date()); }
+function sumaDias(d, n){
+  const x = startOfDay(d);
+  x.setDate(x.getDate() + n);
+  return startOfDay(x);
+}
+const lunesDe = d => { const x = startOfDay(d); x.setDate(x.getDate() - ((x.getDay()+6)%7)); return startOfDay(x); };
 
 /* ================= UTILIDADES ================= */
 const hhmm = s => Math.floor(s/3600)+':'+String(Math.floor(s%3600/60)).padStart(2,'0');
@@ -391,22 +448,50 @@ const sumar = l => l.reduce((a,e)=>a+dur(e),0);
 const logea = (accion, quien) => LOG.unshift({ts:Date.now(), quien: quien || (ME?ME.nom:'Sistema'), accion});
 
 let ME = null, vista = 'fichaje', timer = null, rango = 14;
-let calMode = 'week', calAnchor = lunesDe(new Date()), HOUR = 52;
+let calMode = 'week', calAnchor = lunesDe(hoy()), HOUR = 52;
 
+/* Una entrada por vista. El título de la barra superior sale de aquí y la
+   navegación usa las mismas claves, así que no pueden desincronizarse. */
 const TITULOS = {
-  fichaje:['Fichaje',''],
+  fichaje:['Hoy',''],
   calendario:['Calendario',''],
   informes:['Informes',''],
   proyectos:['Proyectos',''],
   gestion:['Gestión',''],
   equipo:['Equipo',''],
-  usuarios:['Usuarios',''],
-  tabla:['Tabla',''],
-  tablero:['Tablero',''],
+  tabla:['Tareas',''],
   mistareas:['Mis tareas',''],
-  flujos:['Estados',''],
-  ayuda:['Ayuda','']
+  flujos:['Estados','']
 };
+
+function puedeVerGestion(){
+  if(!ME) return false;
+  return ME.rol==='admin' || ME.rol==='gestion' || ME.categoria==='gestion' ||
+    ME.perfil==='gestion' || ME.permisoGestion===true;
+}
+function pintaPermisosVista(){
+  const ocultoPorModulo = el =>
+    (typeof modulo!=='undefined') &&
+    ((el.classList.contains('mod-fichaje') && modulo!=='fichaje') ||
+     (el.classList.contains('mod-produccion') && modulo!=='produccion'));
+  $$('.admin-only').forEach(el=>el.classList.toggle('hide', !ME || ME.rol!=='admin' || ocultoPorModulo(el)));
+  $$('.admin-gestion-only').forEach(el=>el.classList.toggle('hide', !puedeVerGestion() || ocultoPorModulo(el)));
+  $$('.normal-only').forEach(el=>el.classList.toggle('hide', puedeVerGestion() || ocultoPorModulo(el)));
+}
+function esColorProyecto(c){
+  return typeof c === 'string' && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(c.trim());
+}
+function aplicaTemaProyecto(color){
+  const app = $('#app');
+  if(!app) return;
+  if(esColorProyecto(color)){
+    app.classList.add('proy-themed');
+    app.style.setProperty('--proy-theme', color.trim());
+  } else {
+    app.classList.remove('proy-themed');
+    app.style.removeProperty('--proy-theme');
+  }
+}
 
 /* ================= AUTENTICACIÓN ================= */
 const APP_NOMBRE = 'La Corte Fichaje';
@@ -420,26 +505,27 @@ function irAuth(v){
   vistaAuth = v;
   Object.entries(PANELES).forEach(([k,sel])=>$(sel).classList.toggle('hide', k!==v));
   $$('#login .msg').forEach(m=>m.classList.add('hide'));
-  clearInterval(demoT); demoT = null;
-  if(v==='mfa' || v==='enroll') arrancaDemo(v);
   const foco = {login:'#u', mfa:'#mfaCode', enroll:'#enCode', reset:'#rsUser'}[v];
   if(foco) setTimeout(()=>$(foco).focus(), 40);
 }
 const errAuth = (sel, m) => { const e=$(sel); e.textContent=m; e.classList.remove('hide'); };
 
-/* ---- ayuda solo del prototipo: enseña el código válido ahora mismo ---- */
-let demoT = null;
-function arrancaDemo(v){
-  const cajaSel = v==='mfa' ? '#mfaDemo' : '#enDemo';
-  const secreto = () => v==='mfa' ? (pendiente && pendiente.mfa.secreto) : enrollSecreto;
-  const pinta = () => {
-    const s = secreto(); if(!s) return;
-    $(cajaSel).innerHTML = `<strong>Solo en el prototipo:</strong> como no tienes la app instalada,
-      aquí tienes el código válido ahora mismo — <b>${totp(s)}</b>
-      <span class="cd">(cambia en ${segundosRestantes()} s)</span>.
-      En la app real este recuadro no existe: el código solo está en tu móvil.`;
-  };
-  pinta(); demoT = setInterval(pinta, 1000);
+function usuarioDesdeServidor(sp){
+  if(!sp) return null;
+  const login = String(sp.usuario||'').toLowerCase();
+  let u = USERS.find(x=>x.user===login) || USERS.find(x=>x.id===sp.id);
+  if(!u){
+    u = {id:sp.id, user:login, nom:sp.nombre, rol:sp.rol, ini:sp.iniciales||'?',
+      alta:sp.alta||fechaISOLocal(), activo:sp.activo!==false, salt:'', hash:'', iter:ITER,
+      mfa:{secreto:null, activo:!!sp.mfa_activo, recup:[]}, reset:null};
+    USERS.push(u);
+    nextUserId = Math.max(nextUserId, u.id+1);
+  } else {
+    u.id = sp.id; u.nom = sp.nombre; u.rol = sp.rol; u.ini = sp.iniciales||u.ini;
+    u.activo = sp.activo!==false;
+    if(u.mfa) u.mfa.activo = !!sp.mfa_activo;
+  }
+  return u;
 }
 
 /* ---- entrada de credenciales ---- */
@@ -454,16 +540,28 @@ function intentaLogin(u, pass){
 $('#loginForm').addEventListener('submit', ev=>{
   ev.preventDefault();
   const nom = $('#u').value.trim().toLowerCase(), pass = $('#p').value.trim();
-  intentaLogin(USERS.find(x=>x.user===nom), pass);
+  fetch('/api/acceso/entrar', {
+    method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({usuario:nom, clave:pass})
+  }).then(r=>r.json().then(data=>({ok:r.ok, status:r.status, data})).catch(()=>({ok:false, status:r.status, data:null})))
+    .then(res=>{
+      if(res.data && res.data.ok && res.data.usuario){
+        entra(usuarioDesdeServidor(res.data.usuario), {sesion:true});
+        return;
+      }
+      if(res.data && (res.data.necesita_mfa || res.data.necesita_alta_mfa)){
+        errAuth('#loginErr','Esta cuenta tiene doble factor en el servidor. Entra cuando esté listo el flujo, o pide un código al administrador.');
+        return;
+      }
+      if(res.status===401 || res.status===400 || res.status===429){
+        errAuth('#loginErr', (res.data && res.data.error) || 'Usuario o contraseña incorrectos.');
+        return;
+      }
+      intentaLogin(USERS.find(x=>x.user===nom), pass);
+    })
+    .catch(()=>intentaLogin(USERS.find(x=>x.user===nom), pass));
 });
-$$('[data-quick]').forEach(b=>b.addEventListener('click', ()=>{
-  const u = USERS.find(x=>x.user===b.dataset.quick);
-  if(!u) return;
-  $('#u').value = u.user;
-  $('#p').value = '';
-  $('#p').focus();
-}));
-
 /* ---- segundo factor ---- */
 $('#mfaForm').addEventListener('submit', ev=>{
   ev.preventDefault();
@@ -496,7 +594,7 @@ let enrollSecreto = null, enrollUser = null, enrollDesdeApp = false;
 const volverAlaApp = () => {
   enrollDesdeApp = false;
   $('#login').classList.add('hide'); $('#app').classList.remove('hide');
-  clearInterval(demoT); demoT = null;
+
   render();
 };
 function empiezaEnroll(u){
@@ -588,18 +686,44 @@ $('#resetForm').addEventListener('submit', ev=>{
 });
 
 /* ---- entrada efectiva a la app ---- */
-function entra(u){
+function entra(u, opts){
   ME = u; pendiente = null;
-  clearInterval(demoT); demoT = null;
+  recortaProyectosAjenos();
+  aseguraPersonal(ME.id);
+
   $('#login').classList.add('hide'); $('#app').classList.remove('hide');
   $('#meName').textContent = ME.nom;
   $('#meRole').textContent = ME.rol==='admin' ? 'Administrador' : 'Usuario';
   $('#meAvatar').textContent = ME.ini;
-  $$('.admin-only').forEach(el=>el.classList.toggle('hide', ME.rol!=='admin'));
+  pintaPermisosVista();
+  renderChat();
   logea('Inicio de sesión', ME.nom);
   initSelects(); irModulo('fichaje'); go('fichaje'); armaCalendario();
   if(window.LC && LC.guarda && LC.guarda.listo){
-    LC.guarda.listo.then(()=>{ if(ME && typeof render==='function') render(); });
+    LC.guarda.listo.then(()=>{
+      recortaProyectosAjenos();
+      aseguraPersonal(ME.id);
+      if(typeof recortaProduccionAjena==='function') recortaProduccionAjena();
+      if(ME && typeof render==='function') render();
+    });
+  }
+  const trasSesion = ()=>{
+    recortaProyectosAjenos();
+    aseguraPersonal(ME.id);
+    if(typeof recortaProduccionAjena==='function') recortaProduccionAjena();
+    initSelects();
+    if(typeof pintaExplora==='function') pintaExplora();
+    if(typeof render==='function') render();
+    arrancaChatServidor();
+  };
+  if(opts && opts.sesion){
+    Promise.resolve()
+      .then(()=>typeof cargarHorasServidor==='function' && cargarHorasServidor())
+      .then(()=>typeof subirHorasPendientes==='function' && subirHorasPendientes())
+      .then(()=>typeof cargarProduccionServidor==='function' && cargarProduccionServidor())
+      .then(trasSesion)
+      .catch(()=>{ arrancaChatServidor(); });
+    return;
   }
   const clave = ($('#p').value||'').trim();
   if(!clave) return;
@@ -611,19 +735,22 @@ function entra(u){
     if(typeof cargarHorasServidor==='function') return cargarHorasServidor();
   }).then(()=>{
     if(typeof subirHorasPendientes==='function') return subirHorasPendientes();
-  }).then(()=>{ if(typeof render==='function') render(); }).catch(()=>{});
+  }).then(()=>{
+    if(typeof cargarProduccionServidor==='function') return cargarProduccionServidor();
+  }).then(trasSesion).catch(()=>{});
 }
 function salirAlLogin(){
+  paraChatServidor();
   fetch('/api/acceso/salir', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'}, body:'{}'}).catch(()=>{});
   ME=null; timer=null; pendiente=null;
   $('#app').classList.add('hide'); $('#login').classList.remove('hide');
+  chatAbierto=false; chatCon=null; renderChat();
   $('#u').value=''; $('#p').value=''; irAuth('login'); paintTimer();
 }
 function pideSalir(){
   if(!ME) return;
   $('#modalHost').innerHTML = `<div class="overlay" id="salirOv"><div class="modal">
-    <div class="lbl" style="margin-bottom:12px">Salir</div>
     <h2>¿Volver al acceso?</h2>
     <p class="cap">${timer?'Hay un cronómetro en marcha: se va a parar. ':''}Se cierra la sesión.</p>
     <div class="acts">
@@ -646,7 +773,6 @@ function modalMiCuenta(){
   const m = ME.mfa.activo;
   const quedan = ME.mfa.recup.filter(r=>!r.usado).length;
   $('#modalHost').innerHTML = `<div class="overlay"><div class="modal">
-    <div class="lbl" style="margin-bottom:12px">Mi cuenta</div>
     <h2>${esc(ME.nom)}</h2><p class="cap">${esc(ME.user)} · ${ME.rol==='admin'?'Administrador':'Usuario'}</p>
     <div class="policy">
       <div><div class="pt">Contraseña</div><div class="pd">Guardada cifrada. Nadie puede consultarla.</div></div>
@@ -656,9 +782,22 @@ function modalMiCuenta(){
         <div class="pd">${m ? `Activa · te quedan ${quedan} códigos de recuperación`
                             : 'Desactivada. Muy recomendable activarla.'}</div></div>
       <button class="btn btn-sm${m?'':' btn-primary'}" id="mcMfa">${m?'Desactivar':'Activar'}</button></div>
+    <div class="policy apilada">
+      <div><div class="pt">Tema</div>
+        <div class="pd">«Sistema» sigue al de tu ordenador. Se guarda en este navegador.</div></div>
+      <div class="seg" id="mcTema">
+        ${[['sistema','Sistema'],['claro','Claro'],['oscuro','Oscuro']].map(([k,v])=>
+          `<button type="button" data-tema="${k}" aria-pressed="${LC.tema.actual()===k}">${v}</button>`).join('')}
+      </div></div>
     <div class="acts"><button class="btn btn-primary" id="mcOk" style="padding:9px 16px">Cerrar</button></div>
   </div></div>`;
   $('#mcOk').addEventListener('click', cerrarModal);
+  $$('#mcTema button').forEach(b=>b.addEventListener('click', ()=>{
+    LC.tema.poner(b.dataset.tema);
+    $$('#mcTema button').forEach(x=>x.setAttribute('aria-pressed', x===b));
+    /* Los gráficos se pintan en SVG con colores ya resueltos: hay que repintarlos. */
+    render();
+  }));
   $('#mcPass').addEventListener('click', modalCambiarPass);
   $('#mcMfa').addEventListener('click', ()=>{
     if(m){
@@ -674,7 +813,6 @@ function modalMiCuenta(){
 }
 function modalCambiarPass(){
   $('#modalHost').innerHTML = `<div class="overlay"><div class="modal">
-    <div class="lbl" style="margin-bottom:12px">Seguridad</div>
     <h2>Cambiar mi contraseña</h2>
     <p class="cap">Escribe la actual y la nueva. Se guarda cifrada.</p>
     <div class="msg msg-err hide" id="cpErr"></div>
@@ -704,25 +842,28 @@ function modalCambiarPass(){
 /* ================= NAVEGACIÓN ================= */
 $$('.nav').forEach(b=>b.addEventListener('click', ()=>go(b.dataset.view)));
 function go(v){
+  if(v==='tablero'){
+    if(typeof vistaTareas!=='undefined') vistaTareas = 'tablero';
+    v = 'tabla';
+  }
+  if(v==='gestion' && !puedeVerGestion()) v = 'fichaje';
+  if(v==='equipo' && (!ME || ME.rol!=='admin')) v = 'fichaje';
   vista = v;
   $$('.nav').forEach(b=>b.setAttribute('aria-current', b.dataset.view===v?'page':'false'));
   Object.keys(TITULOS).forEach(x=>$('#v-'+x).classList.toggle('hide', x!==v));
   $('#pageTitle').textContent = TITULOS[v][0];
   $('#pageSub').textContent = TITULOS[v][1];
   $('#pageSub').classList.toggle('hide', !TITULOS[v][1]);
-  if($('#ayudaBtn')) $('#ayudaBtn').setAttribute('aria-current', v==='ayuda'?'true':'false');
   render();
   if(v==='calendario') scrollCalendario();
 }
 function initSelects(){
-  const optP = PROYECTOS.map(p=>`<option value="${p.id}">${esc(p.nom)}</option>`).join('');
+  const optP = proyectosVisibles().map(p=>`<option value="${p.id}">${esc(p.nom)}</option>`).join('');
   const optC = CATS.map(c=>`<option value="${c.id}">${esc(c.nom)}</option>`).join('');
   $('#tProy').innerHTML = optP; $('#mProy').innerHTML = optP;
   $('#tCat').innerHTML = optC;  $('#mCat').innerHTML = optC;
   $('#fProyecto').innerHTML = '<option value="">Todos los proyectos</option>'+optP;
-  $('#fPersona').innerHTML = '<option value="">Todo el equipo</option>'+
-    USERS.map(u=>`<option value="${u.id}"${u.id===ME.id?' selected':''}>${esc(u.nom)}</option>`).join('');
-  $('#mFecha').valueAsDate = new Date();
+  $('#mFecha').value = fechaISOLocal();
 }
 
 
@@ -735,6 +876,274 @@ function toast(texto, accion, fn){
   if(accion) $('#toastBtn').addEventListener('click', ()=>{ fn(); h.innerHTML=''; });
   toastT = setTimeout(()=>h.innerHTML='', accion?6000:2600);
 }
+
+/* ---------- CHAT INTERNO ---------- */
+let chatAbierto = false, chatCon = null, chatElige = false, chatBusca = '', nextChat = 1, CHAT = [];
+let chatFirma = '';
+let chatPoll = 0, chatServidor = false, chatAvisoMsg = null, chatAvisoT = null;
+const chatAvisados = new Set();
+const ICO_CHAT_X = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const ICO_CHAT_BUSCA = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
+function persistChat(){
+  try { localStorage.setItem('lc_chat_v1', JSON.stringify({next:nextChat, mensajes:CHAT})); } catch(_){}
+}
+(function recuperaChat(){
+  try {
+    const d = JSON.parse(localStorage.getItem('lc_chat_v1')||'null');
+    if(!d || !Array.isArray(d.mensajes)) return;
+    CHAT = d.mensajes; if(d.next) nextChat = Math.max(nextChat, +d.next);
+  } catch(_){}
+})();
+function msgDeServidor(m){
+  return {
+    id:m.id, de:m.de, para:m.para, txt:m.texto||'', ts:m.ts, leido:!!m.leido, enServidor:true,
+    adj: m.adj_nom ? {nom:m.adj_nom, tipo:m.adj_tipo, tam:m.adj_tam, data:null} : null
+  };
+}
+function maxChatServidor(){
+  return CHAT.reduce((a,m)=>m.enServidor ? Math.max(a, m.id) : a, 0);
+}
+function meteMensajeChat(m){
+  const i = CHAT.findIndex(x=>x.id===m.id && x.enServidor);
+  if(i>=0) CHAT[i] = Object.assign({}, CHAT[i], m);
+  else CHAT.push(m);
+  nextChat = Math.max(nextChat, m.id+1);
+}
+function enseñaAvisoChat(m){
+  if(!ME || !m || m.para!==ME.id || m.de===ME.id || m.leido) return;
+  if(chatAbierto && chatCon===m.de && !chatElige) return;
+  if(chatAvisados.has(m.id)) return;
+  chatAvisados.add(m.id);
+  chatAvisoMsg = m;
+  clearTimeout(chatAvisoT);
+  chatAvisoT = setTimeout(()=>{
+    if(chatAvisoMsg && chatAvisoMsg.id===m.id){ chatAvisoMsg = null; renderChat(true); }
+  }, 8000);
+}
+function htmlChatAviso(){
+  if(chatAbierto || !chatAvisoMsg || !ME) return '';
+  const m = chatAvisoMsg;
+  const u = userById(m.de);
+  const prev = (m.txt || (m.adj && m.adj.nom) || 'Mensaje nuevo').replace(/\s+/g,' ').slice(0,72);
+  return `<button type="button" class="chataviso" id="chatAviso">
+    ${htmlAvChat(u)}
+    <span class="chataviso-tx"><b>${esc((u&&u.nom)||'Alguien')}</b><span>${esc(prev)}</span></span>
+  </button>`;
+}
+function abreAvisoChat(){
+  if(!chatAvisoMsg) return;
+  chatCon = chatAvisoMsg.de;
+  chatElige = false;
+  chatAbierto = true;
+  chatAvisoMsg = null;
+  renderChat(true);
+}
+function traeChatServidor(){
+  if(!ME || typeof apiJson!=='function') return Promise.resolve();
+  const despues = maxChatServidor();
+  return apiJson('/api/chat?despues='+despues).then(data=>{
+    const lista = (data && data.mensajes) || [];
+    let hay = false, aviso = null;
+    lista.forEach(raw=>{
+      const m = msgDeServidor(raw);
+      const era = CHAT.some(x=>x.id===m.id && x.enServidor);
+      meteMensajeChat(m);
+      hay = true;
+      if(!era && m.para===ME.id && m.de!==ME.id) aviso = m;
+    });
+    if(aviso) enseñaAvisoChat(aviso);
+    if(hay){ persistChat(); renderChat(true); }
+  }).catch(()=>{});
+}
+function arrancaChatServidor(){
+  chatServidor = true;
+  traeChatServidor();
+  clearInterval(chatPoll);
+  chatPoll = setInterval(traeChatServidor, 4000);
+}
+function paraChatServidor(){
+  chatServidor = false;
+  clearInterval(chatPoll);
+  chatPoll = 0;
+  chatAvisoMsg = null;
+  clearTimeout(chatAvisoT);
+}
+function chatUsuarios(){
+  return USERS.filter(u=>u.activo && ME && u.id!==ME.id);
+}
+function chatUnread(de){
+  if(!ME) return 0;
+  return CHAT.filter(m=>m.para===ME.id && !m.leido && (de==null || m.de===de)).length;
+}
+function chatUltimo(uid){
+  for(let i=CHAT.length-1;i>=0;i--){
+    const m = CHAT[i];
+    if((m.de===ME.id && m.para===uid) || (m.de===uid && m.para===ME.id)) return m;
+  }
+  return null;
+}
+function htmlAvChat(u){
+  if(!u) return '';
+  if(typeof htmlAv==='function') return htmlAv(u);
+  const ini = (u.ini || (u.nom||'').split(/\s+/).slice(0,2).map(w=>w[0]||'').join('') || '?').toUpperCase();
+  return `<span class="asig-av">${esc(ini)}</span>`;
+}
+function leeAdjuntoChat(file){
+  return new Promise((ok, ko)=>{
+    if(!file) return ok(null);
+    if(file.size > 4*1024*1024) return ko(new Error('max'));
+    const r = new FileReader();
+    r.onload = () => ok({nom:file.name, tipo:file.type||'application/octet-stream', tam:file.size, data:r.result});
+    r.onerror = () => ko(r.error || new Error('archivo'));
+    r.readAsDataURL(file);
+  });
+}
+function htmlChatGente(){
+  const q = chatBusca.trim().toLowerCase();
+  const lista = chatUsuarios().filter(u=>{
+    if(!q) return true;
+    return (u.nom||'').toLowerCase().includes(q) || (u.user||'').toLowerCase().includes(q);
+  });
+  if(!lista.length){
+    return `<p class="chatvacio">${q?'Nadie coincide con esa búsqueda.':'No hay más cuentas en el estudio.'}</p>`;
+  }
+  return lista.map(u=>{
+    const ult = chatUltimo(u.id);
+    const n = chatUnread(u.id);
+    const pie = ult
+      ? ((ult.de===ME.id?'Tú: ':'') + (ult.txt || ult.adj && ult.adj.nom || ''))
+      : '@'+u.user;
+    return `<button type="button" class="chatfila${u.id===chatCon?' on':''}" data-con="${u.id}">
+      ${htmlAvChat(u)}
+      <span><span class="cn">${esc(u.nom)}</span><span class="cs">${esc(pie)}</span></span>
+      ${n?`<span class="cu">${n}</span>`:''}
+    </button>`;
+  }).join('');
+}
+function htmlChatHilo(){
+  const hilo = chatCon ? CHAT.filter(m=>
+    (m.de===ME.id && m.para===chatCon) || (m.de===chatCon && m.para===ME.id)) : [];
+  if(!hilo.length) return '<p class="chatvacio">Todavía no habéis escrito nada.</p>';
+  return hilo.map(m=>`<div class="msgchat${m.de===ME.id?' yo':''}">
+    <div class="meta">${esc(m.de===ME.id?'Tú':((userById(m.de)||{}).nom||'—'))} · ${fHora(m.ts)}</div>
+    ${m.txt?`<div class="tx">${esc(m.txt)}</div>`:''}
+    ${m.adj && m.adj.data ? `<a href="${m.adj.data}" download="${esc(m.adj.nom)}">${esc(m.adj.nom)}</a>`
+      : (m.adj ? `<span class="tx">${esc(m.adj.nom)}</span>` : '')}
+  </div>`).join('');
+}
+function renderChat(forzar){
+  const dock = $('#chatDock');
+  if(!dock || !ME){ if(dock) dock.innerHTML=''; chatFirma=''; return; }
+  const gente = chatUsuarios();
+  if(chatCon && !gente.some(u=>u.id===chatCon)){ chatCon = null; chatElige = true; }
+  const hiloN = chatCon ? CHAT.filter(m=>
+    (m.de===ME.id && m.para===chatCon) || (m.de===chatCon && m.para===ME.id)).length : 0;
+  const unread = chatUnread();
+  const firma = [ME.id, chatAbierto?1:0, chatCon||0, chatElige?1:0, unread, hiloN, chatAvisoMsg&&chatAvisoMsg.id].join(':');
+  if(!forzar && firma===chatFirma && dock.querySelector('.chatfab')) return;
+  chatFirma = firma;
+  if(chatAbierto && chatCon && !chatElige){
+    CHAT.forEach(m=>{ if(m.para===ME.id && m.de===chatCon) m.leido = true; });
+    persistChat();
+    if(chatServidor && typeof apiJson==='function'){
+      apiJson('/api/chat/leer', {method:'POST', body:JSON.stringify({de:chatCon})}).catch(()=>{});
+    }
+    if(chatAvisoMsg && chatAvisoMsg.de===chatCon) chatAvisoMsg = null;
+  }
+  const con = chatCon && userById(chatCon);
+  const ICO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14v9H8l-3 3z"/></svg>';
+  dock.innerHTML = `<button class="chatfab" id="chatFab" type="button" title="Chat interno"
+    aria-expanded="${chatAbierto}" aria-controls="chatBox">
+    ${ICO}${unread?`<span class="dot">${unread}</span>`:''}
+  </button>
+  ${chatAbierto?`<div class="chatbox" id="chatBox">
+    <header>
+      ${con && !chatElige
+        ? `<button type="button" class="chat-persona" id="chatCambiar" title="Cambiar de persona">
+            ${htmlAvChat(con)}
+            <span class="chat-pn"><b>${esc(con.nom)}</b><span>@${esc(con.user)}</span></span>
+          </button>`
+        : `<div class="chat-pn"><b>Equipo</b><span>Busca a alguien</span></div>`}
+      <button class="chat-x" id="chatCerrar" type="button" title="Cerrar">${ICO_CHAT_X}</button>
+    </header>
+    ${chatElige || !con
+      ? `<label class="chatbusca">${ICO_CHAT_BUSCA}
+          <input id="chatBusca" type="search" placeholder="Nombre o usuario" value="${esc(chatBusca)}" autocomplete="off">
+        </label>
+        <div class="chatgente" id="chatGente">${htmlChatGente()}</div>`
+      : `<div class="chatmsgs" id="chatMsgs">${htmlChatHilo()}</div>
+        <form class="chatform" id="chatForm">
+          <label class="chatfile" title="Adjuntar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5V7a5 5 0 00-10 0v11a3 3 0 006 0V8"/></svg>
+            <input type="file" id="chatAdj" class="hide" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.doc,.docx,image/*,application/pdf">
+          </label>
+          <input class="field" id="chatTxt" placeholder="Mensaje" autocomplete="off">
+          <button class="btn btn-primary" type="submit">Enviar</button>
+        </form>`}
+  </div>`:''}
+  ${htmlChatAviso()}`;
+  const aviso = $('#chatAviso');
+  if(aviso) aviso.addEventListener('click', ()=>abreAvisoChat());
+  $('#chatFab').addEventListener('click', ()=>{
+    chatAbierto = !chatAbierto;
+    if(chatAbierto && !chatCon) chatElige = true;
+    renderChat(true);
+  });
+  const cerrar = $('#chatCerrar');
+  if(cerrar) cerrar.addEventListener('click', ()=>{ chatAbierto=false; chatElige=false; renderChat(true); });
+  const cambiar = $('#chatCambiar');
+  if(cambiar) cambiar.addEventListener('click', ()=>{ chatElige=true; renderChat(true); });
+  const busca = $('#chatBusca');
+  if(busca){
+    busca.addEventListener('input', e=>{
+      chatBusca = e.target.value;
+      const caja = $('#chatGente');
+      if(caja) caja.innerHTML = htmlChatGente();
+    });
+    setTimeout(()=>busca.focus(), 30);
+  }
+  const genteCaja = $('#chatGente');
+  if(genteCaja) genteCaja.addEventListener('click', ev=>{
+    const b = ev.target.closest('[data-con]');
+    if(!b) return;
+    chatCon = +b.dataset.con;
+    chatElige = false;
+    chatBusca = '';
+    renderChat(true);
+  });
+  const form = $('#chatForm');
+  if(form) form.addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    if(!chatCon) return;
+    const txt = $('#chatTxt').value.trim(), file = $('#chatAdj').files[0];
+    if(!txt && !file) return;
+    try {
+      const adj = await leeAdjuntoChat(file);
+      const local = {id:nextChat++, de:ME.id, para:chatCon, txt, adj, ts:Date.now(), leido:false, enServidor:false};
+      if(chatServidor && typeof apiJson==='function'){
+        try {
+          const data = await apiJson('/api/chat', {method:'POST', body:JSON.stringify({
+            para:chatCon, texto:txt,
+            adj_nom: adj && adj.nom, adj_tipo: adj && adj.tipo, adj_tam: adj && adj.tam
+          })});
+          if(data && data.mensaje){
+            const m = msgDeServidor(data.mensaje);
+            if(adj && adj.data) m.adj = adj;
+            meteMensajeChat(m);
+          } else CHAT.push(local);
+        } catch(_){ CHAT.push(local); }
+      } else CHAT.push(local);
+      persistChat(); renderChat(true);
+    } catch(_){ toast('Adjunto demasiado grande'); }
+  });
+  const msgs = $('#chatMsgs'); if(msgs) msgs.scrollTop = msgs.scrollHeight;
+  const txt = $('#chatTxt'); if(txt) setTimeout(()=>txt.focus(), 30);
+}
+document.addEventListener('keydown', ev=>{
+  if(ev.key!=='Escape' || !chatAbierto) return;
+  if(chatElige && chatCon){ chatElige=false; renderChat(true); ev.preventDefault(); return; }
+  chatAbierto=false; chatElige=false; renderChat(true);
+});
 
 /* ---------- API interna para otros módulos ---------- */
 const RESET_LOCAL_MS = 24*3600*1000;
@@ -758,10 +1167,11 @@ function altaAdminUsuario(nom, user, rol){
   if(USERS.some(u=>u.user===user)) return {error:'Ese usuario ya existe.'};
   const ini = nom.split(/\s+/).slice(0,2).map(w=>w[0]||'').join('').toUpperCase() || user.slice(0,2).toUpperCase();
   const u = {id:nextUserId++, user, nom, rol:rol==='admin'?'admin':'usuario', ini,
-    alta:new Date().toISOString().slice(0,10), activo:true,
+    alta:fechaISOLocal(), activo:true,
     salt:nuevaSal(), hash:'', iter:ITER, mfa:{secreto:null, activo:false, recup:[]}, reset:null};
   USERS.push(u);
   logea(`Alta de usuario «${user}» (${nom})`);
+  aseguraPersonal(u.id);
   return resetAdminUsuario(u.id, 'alta nueva');
 }
 
@@ -769,11 +1179,10 @@ window.LC = window.LC || {};
 LC.nucleo = {
   usuarios: () => USERS.map(u=>u),
   usuario: id => userById(+id),
-  proyectos: () => PROYECTOS.map(p=>p),
+  proyectos: () => proyectosVisibles().map(p=>p),
   proyecto: id => proyById(+id),
   categorias: () => CATS.map(c=>({...c})),
   estados: () => ({...ESTADOS}),
-  tarifa: () => ({...TARIFA}),
   ajustes: () => AJUSTES,
   solicitudes: () => SOLICITUDES.map(s=>s),
   actividad: () => LOG.map(l=>l),

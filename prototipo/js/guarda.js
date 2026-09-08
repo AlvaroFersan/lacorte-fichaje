@@ -89,8 +89,8 @@
       return {
         id:t.id, proyId:t.proyId, bloqueId:t.bloqueId, titulo:t.titulo, desc:t.desc||'',
         asignado:t.asignado==null?null:+t.asignado, estado:t.estado, prioridad:t.prioridad,
-        fin:t.fin||'', creador:t.creador, creado:t.creado,
-        subtareas:t.subtareas||[], comentarios:t.comentarios||[], campos:t.campos||{},
+        flujoId:t.flujoId||null, fin:t.fin||'', creador:t.creador, creado:t.creado,
+        comentarios:t.comentarios||[], campos:t.campos||{},
         adjuntos
       };
     });

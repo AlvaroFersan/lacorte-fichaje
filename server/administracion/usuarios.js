@@ -3,7 +3,9 @@
 const express = require('express');
 const auth = require('../auth');
 const db = require('../db');
+const { fechaISOLocal, esFechaISO } = require('../lib/fechas');
 const { publico, exigirAdmin } = require('../lib/permisos');
+const { crearProyectoPersonal } = require('../produccion/plantilla');
 
 const router = express.Router();
 
@@ -31,7 +33,7 @@ router.post('/', exigirAdmin, async (req, res) => {
 
   const partes = nombre.split(/\s+/);
   const iniciales = ((partes[0] || 'X')[0] + (partes[1] || partes[0] || 'X')[0]).toUpperCase();
-  const alta = new Date().toISOString().slice(0, 10);
+  const alta = esFechaISO(req.body.alta) ? req.body.alta : fechaISOLocal();
   const hash = await auth.hashear(require('crypto').randomBytes(16).toString('hex'));
   const r = db.get().prepare(
     'INSERT INTO usuarios (usuario, nombre, iniciales, rol, activo, alta, hash) VALUES (?, ?, ?, ?, 1, ?, ?)'
@@ -41,6 +43,7 @@ router.post('/', exigirAdmin, async (req, res) => {
   const resetHash = await auth.hashear(codigo);
   db.get().prepare('UPDATE usuarios SET reset_hash = ?, reset_caduca = ? WHERE id = ?')
     .run(resetHash, Date.now() + auth.RESET_MS, r.lastInsertRowid);
+  crearProyectoPersonal(db.get(), r.lastInsertRowid);
 
   auth.logea(req.usuario.nombre, `Alta de usuario «${usuario}» (${nombre})`);
   res.status(201).json({

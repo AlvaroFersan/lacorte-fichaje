@@ -131,7 +131,7 @@ $('#zIn').addEventListener('click',  ()=>{ HOUR = Math.min(HOUR+14, 108); render
 $('#zOut').addEventListener('click', ()=>{ HOUR = Math.max(HOUR-14, 24);  renderCalendario(); });
 $('#calPrev').addEventListener('click', ()=>{ calAnchor = new Date(calAnchor.getTime()-(calMode==='week'?7:1)*DAY); renderCalendario(); });
 $('#calNext').addEventListener('click', ()=>{ calAnchor = new Date(calAnchor.getTime()+(calMode==='week'?7:1)*DAY); renderCalendario(); });
-$('#calToday').addEventListener('click', ()=>{ calAnchor = calMode==='week'?lunesDe(new Date()):HOY; renderCalendario(); scrollCalendario(); });
+$('#calToday').addEventListener('click', ()=>{ calAnchor = calMode==='week'?lunesDe(hoy()):hoy(); renderCalendario(); scrollCalendario(); });
 
 /* en móvil la rejilla semanal no cabe: se abre en vista de día */
 if(matchMedia('(max-width:760px)').matches){
@@ -141,7 +141,7 @@ if(matchMedia('(max-width:760px)').matches){
 function diasVisibles(){
   if(calMode==='day') return [startOfDay(calAnchor)];
   const l = lunesDe(calAnchor);
-  return Array.from({length:7}, (_,i)=>new Date(l.getTime()+i*DAY));
+  return Array.from({length:7}, (_,i)=>sumaDias(l, i));
 }
 function carriles(items){
   const orden = [...items].sort((a,b)=>a.ini-b.ini || b.fin-a.fin);
@@ -178,16 +178,16 @@ function renderCalendario(){
   const dias = diasVisibles(), l = dias[0], f = dias[dias.length-1];
   $('#calLabel').textContent = calMode==='day'
     ? capi(l.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'}))
-    : (lunesDe(new Date()).getTime()===l.getTime() ? 'Esta semana' : `${fSel(l)} – ${fSel(f)}`);
+    : (+lunesDe(hoy())===+l ? 'Esta semana' : `${fSel(l)} – ${fSel(f)}`);
 
   const mias = ENTRADAS.filter(e=>e.userId===ME.id);
-  const semana = mias.filter(e=>e.ini>=+l && e.ini<+f+DAY);
+  const semana = mias.filter(e=>e.ini>=+l && e.ini<+sumaDias(f,1));
   let g = `<div class="chcorner"><span class="lbl">Total</span>
              <span class="tot">${semana.length?hhmm(sumar(semana)):'0:00'}</span></div>`;
   dias.forEach(d=>{
-    const tot = sumar(mias.filter(e=>e.ini>=+d && e.ini<+d+DAY));
+    const tot = sumar(mias.filter(e=>e.ini>=+d && e.ini<+sumaDias(d,1)));
     const wk = d.getDay()===0||d.getDay()===6;
-    g += `<div class="chday${+d===+HOY?' today':''}${wk?' wknd':''}">
+    g += `<div class="chday${+d===+hoy()?' today':''}${wk?' wknd':''}">
       <div class="d1">${capi(d.toLocaleDateString('es-ES',{weekday:'short'}).replace('.',''))}, ${d.getDate()} ${d.toLocaleDateString('es-ES',{month:'short'}).replace('.','')}</div>
       <div class="d2">${tot?hhmm(tot):'0:00'}</div></div>`;
   });
@@ -201,16 +201,17 @@ function renderCalendario(){
     let col = `<div class="daycol${wk?' wknd':''}" data-day="${+d}" style="height:${HOUR*24}px">`;
     for(let h=1;h<24;h++) col += `<div class="hline" style="top:${h*HOUR}px"></div>`;
     if(HOUR>=52) for(let h=0;h<24;h++) col += `<div class="hline half" style="top:${h*HOUR+HOUR/2}px"></div>`;
-    if(+d===+HOY){
+    if(+d===+hoy()){
       const n = new Date();
       col += `<div class="nowline" style="top:${(n.getHours()+n.getMinutes()/60)*HOUR}px"></div>`;
     }
-    carriles(mias.filter(e=>e.ini>=+d && e.ini<+d+DAY)).forEach(e=>{ col += htmlBloque(e); });
+    carriles(mias.filter(e=>e.ini>=+d && e.ini<+sumaDias(d,1))).forEach(e=>{ col += htmlBloque(e); });
     g += col+'</div>';
   });
   const grid = $('#calGrid');
   grid.style.gridTemplateColumns = `56px repeat(${dias.length}, minmax(0,1fr))`;
   grid.innerHTML = g;
+  $('#calVacio').classList.toggle('hide', semana.length>0);
   grid.querySelectorAll('[data-blk]').forEach(el=>el.addEventListener('keydown', ev=>{
     marcaSeleccion(+el.dataset.blk);
     if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault();
@@ -437,17 +438,17 @@ function armaCalendario(){
 const cerrarPop = () => $('#popHost').innerHTML='';
 function abrirEditor(e, esNuevo, ev){
   const host = $('#popHost');
-  const fecha = new Date(e.ini), iso = d => new Date(d).toISOString();
+  const fecha = new Date(e.ini);
   const val = ts => { const d = new Date(ts);
     return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
-  const fechaVal = new Date(fecha.getTime()-fecha.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  const fechaVal = fechaISOLocal(fecha);
   host.innerHTML = `<div class="pop ed" id="thePop">
     <div class="lbl" style="margin-bottom:11px">${esNuevo?'Nuevo registro':'Editar registro'}</div>
     <label class="lbl" for="edDesc">En qué has trabajado</label>
     <input class="field" id="edDesc" value="${esc(e.desc)}" placeholder="Descripción de la tarea" style="margin-bottom:11px">
     <label class="lbl" for="edProy">Proyecto</label>
     <select class="field" id="edProy" style="margin-bottom:11px">
-      ${PROYECTOS.map(p=>`<option value="${p.id}"${p.id===e.proyId?' selected':''}>${esc(p.nom)}</option>`).join('')}
+      ${PROYECTOS.filter(p=>typeof puedoVer==='function'?puedoVer(p):(typeof esMio==='function'&&(esMio(p)||estaEnEquipo(p)))).map(p=>`<option value="${p.id}"${p.id===e.proyId?' selected':''}>${esc(p.nom)}</option>`).join('')}
     </select>
     <label class="lbl" for="edTarea">Escena <span style="text-transform:none;letter-spacing:0;font-weight:400">(opcional)</span></label>
     <select class="field" id="edTarea" style="margin-bottom:11px"></select>
@@ -528,7 +529,6 @@ document.addEventListener('pointerdown', ev=>{
               || ev.target.closest('#btnCols') || ev.target.closest('#filaPop')
               || ev.target.closest('.filaMenuBtn') || ev.target.closest('.msub')
               || ev.target.closest('#flujoPop') || ev.target.closest('#btnFlujos')
-              || ev.target.closest('#filtroPop') || ev.target.closest('#btnFiltros')
               || ev.target.closest('#detWrap') || ev.target.closest('#actiWrap');
   if(!dentro) cerrarPop();
 });
@@ -620,48 +620,65 @@ const legend = c => c.innerHTML = CATS.map(x=>`<span><i class="dotcat" style="ba
 /* ================= SELECCIÓN ================= */
 const misEntradas = () => ENTRADAS.filter(e=>e.userId===ME.id);
 function filtradas(){
-  const per = $('#fPersona').value, pro = $('#fProyecto').value, desde = HOY.getTime()-(rango-1)*DAY;
+  const pro = $('#fProyecto').value, desde = +sumaDias(hoy(), 1-rango);
   return ENTRADAS.filter(e=>{
-    if(ME.rol!=='admin' && e.userId!==ME.id) return false;
-    if(ME.rol==='admin' && per && e.userId!==+per) return false;
+    if(e.userId!==ME.id) return false;
     if(pro && e.proyId!==+pro) return false;
     return e.ini >= desde;
   });
 }
 function porDias(lista, n){
   return Array.from({length:n}, (_,k)=>{
-    const ts = HOY.getTime()-(n-1-k)*DAY, parts=[0,0,0];
-    lista.filter(e=>e.ini>=ts && e.ini<ts+DAY).forEach(e=>parts[CATS.findIndex(c=>c.id===e.cat)] += dur(e));
+    const ts = +sumaDias(hoy(), -(n-1-k)), parts=[0,0,0];
+    lista.filter(e=>e.ini>=ts && e.ini<+sumaDias(ts,1)).forEach(e=>parts[CATS.findIndex(c=>c.id===e.cat)] += dur(e));
     return {ts, parts, total:parts.reduce((a,b)=>a+b,0)};
   });
 }
 $$('#rangoSeg button').forEach(b=>b.addEventListener('click', ()=>{
   rango = +b.dataset.r; $$('#rangoSeg button').forEach(x=>x.setAttribute('aria-pressed', x===b)); render();
 }));
-$('#fPersona').addEventListener('change', render);
-$('#fProyecto').addEventListener('change', render);
+/* render() vive en arranque.js, que se carga después: hay que llamarla desde
+   dentro, no pasarla como valor, o este script se rompe al cargarse y LC.fichaje
+   nunca llega a existir (y con él, todo el puente). */
+$('#fProyecto').addEventListener('change', ()=>render());
 
 
 function renderFichaje(){
   const mias = misEntradas();
-  const hoy = mias.filter(e=>e.ini>=HOY.getTime());
-  const lun = lunesDe(new Date()).getTime();
-  const sem = mias.filter(e=>e.ini>=lun), ant = mias.filter(e=>e.ini>=lun-7*DAY && e.ini<lun);
-  const sieteD = mias.filter(e=>e.ini>=HOY.getTime()-6*DAY);
-  $('#kHoy').textContent = hhmm(sumar(hoy))+' h';
+  const deHoy = mias.filter(e=>e.ini>=+hoy());
+  const lun = +lunesDe(hoy());
+  const sem = mias.filter(e=>e.ini>=lun), ant = mias.filter(e=>e.ini>=+sumaDias(lun, -7) && e.ini<lun);
+  const sieteD = mias.filter(e=>e.ini>=+sumaDias(hoy(), -6));
+  $('#kHoy').textContent = hhmm(sumar(deHoy))+' h';
   $('#kSem').textContent = hhmm(sumar(sem))+' h';
   const dif = sumar(sem)-sumar(ant);
-  $('#kSemNota').textContent = ant.length ? `${dif>=0?'+':'−'}${hhmm(Math.abs(dif))} h vs. semana anterior` : '';
-  const nd = new Set(sieteD.map(e=>startOfDay(e.ini).getTime())).size || 1;
-  $('#kMedia').textContent = hhmm(sumar(sieteD)/nd)+' h';
+  $('#kSemNota').textContent = ant.length ? `${dif>=0?'+':'−'}${hhmm(Math.abs(dif))} h que la anterior` : '';
+
+  /* Reparto de la semana por tipo de trabajo. Una barra y su leyenda dicen lo
+     mismo que dos tarjetas de métrica, y además dicen en qué se ha ido el tiempo. */
+  const totSem = sumar(sem);
+  const partes = CATS.map(c=>({c, v: sem.filter(e=>e.cat===c.id).reduce((a,e)=>a+dur(e),0)}))
+                     .filter(p=>p.v>0);
+  $('#kBar').innerHTML = partes.map(p=>
+    `<i style="background:${p.c.color};width:${p.v/totSem*100}%" title="${esc(p.c.nom)}"></i>`).join('');
+  $('#kBar').classList.toggle('hide', !partes.length);
+  $('#kLeg').innerHTML = partes.length
+    ? partes.map(p=>`<span><i class="dotcat" style="background:${p.c.color}"></i>${esc(p.c.nom)} <b>${hhmm(p.v)}</b></span>`).join('')
+    : '<span>Aún sin horas</span>';
+
   const pp = {}; sieteD.forEach(e=>pp[e.proyId] = (pp[e.proyId]||0)+dur(e));
   const top = Object.entries(pp).sort((a,b)=>b[1]-a[1])[0];
-  $('#kProy').textContent = top ? proyById(+top[0]).nom : '—';
-  $('#kProyNota').textContent = top ? hhmm(top[1])+' h en los últimos 7 días' : 'Sin registros';
+  $('#kProyNota').textContent = top
+    ? `Sobre todo en ${proyById(+top[0]).nom} · ${hhmm(top[1])} h`
+    : '';
+  if(LC.administracion && LC.administracion.renderPendientesGestion) LC.administracion.renderPendientesGestion();
 
   const cont = $('#listaEntradas');
-  const rec = mias.filter(e=>e.ini>=HOY.getTime()-6*DAY).sort((a,b)=>b.ini-a.ini);
-  if(!rec.length){ cont.innerHTML='<p class="empty">Todavía no hay registros esta semana.</p>'; return; }
+  const rec = sieteD.slice().sort((a,b)=>b.ini-a.ini);
+  if(!rec.length){
+    cont.innerHTML = '<p class="empty">Aún no has fichado. Dale al play, o anota las horas a mano ahí abajo.</p>';
+    return;
+  }
   const gr = {}; rec.forEach(e=>{ const k=startOfDay(e.ini).getTime(); (gr[k]=gr[k]||[]).push(e); });
   cont.innerHTML = Object.keys(gr).sort((a,b)=>b-a).map(k=>`
     <div class="daygroup"><span>${esc(fFecha(+k))}</span><span>${hhmm(sumar(gr[k]))} h</span></div>
@@ -721,27 +738,20 @@ function renderInformes(){
     }).join('')+'</svg>';
   bindTip(cc);
 
-  /* donut: reparto por proyecto, con el color estable de cada proyecto */
-  donut($('#donutProy'), PROYECTOS.map(p=>({
-    label:p.nom, color:colorProyecto(p.id),
-    valor:lista.filter(e=>e.proyId===p.id).reduce((a,e)=>a+dur(e),0)
-  })).filter(f=>f.valor>0).sort((a,b)=>b.valor-a.valor));
-
   const rows = [...lista].sort((a,b)=>b.ini-a.ini).slice(0,40);
   $('#tablaInforme').innerHTML = rows.length ? `<table><thead><tr>
-    <th>Fecha</th><th>Persona</th><th>Proyecto</th><th>Tipo</th><th>Descripción</th><th class="num">Horas</th>
+    <th>Fecha</th><th>Proyecto</th><th>Tipo</th><th>Descripción</th><th class="num">Horas</th>
     </tr></thead><tbody>${rows.map(e=>`<tr>
-      <td style="color:var(--muted)">${fCorta(e.ini)}</td><td>${esc(userById(e.userId).nom)}</td>
-      <td>${esc(proyById(e.proyId).nom)}</td>
+      <td style="color:var(--muted)">${fCorta(e.ini)}</td><td>${esc(proyById(e.proyId).nom)}</td>
       <td><span class="pill"><i class="dotcat" style="background:${catById(e.cat).color}"></i>${esc(catById(e.cat).nom)}</span></td>
       <td style="color:var(--ink-2)">${esc(e.desc)}</td>
       <td class="num" style="font-weight:600">${hhmm(dur(e))}</td></tr>`).join('')}</tbody></table>
-    ${lista.length>40?`<p class="cap" style="margin:12px 0 0">Mostrando 40 de ${lista.length}. Exporta a CSV para verlos todos.</p>`:''}`
+    ${lista.length>40?`<p class="hint2">40 de ${lista.length}. El CSV los lleva todos.</p>`:''}`
     : '<p class="empty">Sin registros con estos filtros.</p>';
 }
 
 function renderProyectos(){
-  const rows = PROYECTOS.map(p=>{
+  const rows = (typeof proyectosVisibles==='function' ? proyectosVisibles() : PROYECTOS).map(p=>{
     const l = ENTRADAS.filter(e=>e.proyId===p.id && (ME.rol==='admin'||e.userId===ME.id));
     const parts=[0,0,0]; l.forEach(e=>parts[CATS.findIndex(c=>c.id===e.cat)] += dur(e));
     return {p, parts, total:parts.reduce((a,b)=>a+b,0), n:l.length, ult:l.length?Math.max(...l.map(e=>e.ini)):null};
@@ -792,9 +802,9 @@ function donut(cont, filas, opts={}){
   cont.innerHTML = `<div class="donutwrap">
     <svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">${paths}
       <text class="donut-center" x="${cx}" y="${cy-2}" text-anchor="middle"
-        style="font-size:21px;font-weight:500;fill:var(--ink)">${hhmm(total)}</text>
+        style="font-size:20px;font-weight:500;fill:var(--ink)">${hhmm(total)}</text>
       <text x="${cx}" y="${cy+15}" text-anchor="middle"
-        style="font-size:9.5px;letter-spacing:.14em;fill:var(--muted)">HORAS</text>
+        style="font-size:11px;letter-spacing:.14em;fill:var(--muted)">HORAS</text>
     </svg>
     <div class="dlegend">${filas.filter(f=>f.valor>0).map(f=>`<div class="drow">
       <i class="dotcat" style="background:${f.color}"></i>
@@ -847,11 +857,11 @@ $('#btnCSV').addEventListener('click', ()=>{
   try {
     const lista = [...filtradas()].sort((a,b)=>a.ini-b.ini);
     const q = s => '"'+String(s).replace(/"/g,'""')+'"';
-    const head = ['Fecha','Persona','Proyecto','Cliente','Tipo','Descripción','Inicio','Fin','Horas'];
-    const body = lista.map(e=>[new Date(e.ini).toLocaleDateString('es-ES'), (userById(e.userId)||{}).nom||'—',
+    const head = ['Fecha','Proyecto','Cliente','Tipo','Descripción','Inicio','Fin','Horas'];
+    const body = lista.map(e=>[new Date(e.ini).toLocaleDateString('es-ES'),
       (proyById(e.proyId)||{}).nom||'—', (proyById(e.proyId)||{}).cliente||'—', (catById(e.cat)||{}).nom||'—', e.desc,
       fHora(e.ini), fHora(e.fin), (dur(e)/3600).toFixed(2).replace('.',',')].map(q).join(';'));
-    descargarTexto('lacorte_fichaje_'+new Date().toISOString().slice(0,10)+'.csv',
+    descargarTexto('lacorte_fichaje_'+fechaISOLocal()+'.csv',
       '\uFEFF'+[head.map(q).join(';'), ...body].join('\r\n'));
   } catch (err) {
     console.error(err);
@@ -918,9 +928,8 @@ $('#btnPDF').addEventListener('click', ()=>{
   try {
   const lista = [...filtradas()].sort((a,b)=>a.ini-b.ini);
   const tot = sumar(lista);
-  const per = $('#fPersona').value, pro = $('#fProyecto').value;
-  const uSel = per ? userById(+per) : null;
-  const quien = ME.rol==='admin' ? ((uSel&&uSel.nom) || 'Todo el equipo') : ME.nom;
+  const pro = $('#fProyecto').value;
+  const quien = ME.nom;
   const proyNom = pro ? proyById(+pro).nom : 'Todos los proyectos';
   const corte = s => s.length>42 ? s.slice(0,41)+'...' : s;
   const pdf = pdfPaginas(g=>{
@@ -931,7 +940,7 @@ $('#btnPDF').addEventListener('click', ()=>{
       g.txt(40, 776, `Total ${hhmm(tot)} h  ·  ${lista.length} registro${lista.length===1?'':'s'}`, 8);
       g.linea(40, 768, 555, 768);
       y = 752;
-      [['Fecha',40],['Persona',95],['Proyecto',200],['Tipo',318],['Descripción',410],['Horas',520]].forEach(([t,x])=>g.txt(x,y,t,8,true));
+      [['Fecha',40],['Proyecto',110],['Tipo',250],['Descripción',350],['Horas',520]].forEach(([t,x])=>g.txt(x,y,t,8,true));
       y = 736;
     };
     cabecera();
@@ -942,15 +951,14 @@ $('#btnPDF').addEventListener('click', ()=>{
     lista.forEach(e=>{
       if(y<52){ g.nueva(); cabecera(); }
       g.txt(40, y, fCorta(e.ini), 8);
-      g.txt(95, y, corte((userById(e.userId)||{}).nom||'—'), 8);
-      g.txt(200, y, corte(proyById(e.proyId).nom), 8);
-      g.txt(318, y, catById(e.cat).nom, 8);
-      g.txt(410, y, corte(e.desc||'—'), 8);
+      g.txt(110, y, corte(proyById(e.proyId).nom), 8);
+      g.txt(250, y, catById(e.cat).nom, 8);
+      g.txt(350, y, corte(e.desc||'—'), 8);
       g.txt(520, y, hhmm(dur(e)), 8);
       y -= 14;
     });
   });
-  descargarBytes('lacorte_horas_'+new Date().toISOString().slice(0,10)+'.pdf', pdf, 'pdf');
+  descargarBytes('lacorte_horas_'+fechaISOLocal()+'.pdf', pdf, 'pdf');
   } catch(err){
     console.error(err);
     toast('No se ha podido crear el PDF');

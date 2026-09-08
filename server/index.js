@@ -17,7 +17,10 @@ cargarEnv(path.join(__dirname, '..', '.env'));
 const db = require('./db');
 const auth = require('./auth');
 const { sembrarSiVacia } = require('./semilla');
+const { sembrarFlujos, asegurarPersonales } = require('./produccion/plantilla');
 
+/* En el PC, `npm start` es 3000. En el NAS, Docker publica 3001 por fuera
+   (NAS.yml / docker-compose.yml) y el contenedor sigue escuchando en 3000. */
 const PUERTO = Number(process.env.PUERTO) || 3000;
 const RAIZ = path.join(__dirname, '..');
 
@@ -61,6 +64,8 @@ async function main() {
   asegurarSecretoSesion();
   db.abrir();
   const semilla = await sembrarSiVacia();
+  sembrarFlujos(db.get());
+  asegurarPersonales(db.get());
 
   const app = express();
   app.set('trust proxy', 1);
@@ -129,9 +134,11 @@ async function main() {
   app.use('/api/fichaje/entradas', require('./fichaje/entradas'));
   app.use('/api/fichaje/informes', require('./fichaje/informes'));
   app.use('/api/produccion/escenas', require('./produccion/escenas'));
+  app.use('/api/produccion/flujos', require('./produccion/flujos'));
   app.use('/api/acceso', require('./nucleo/acceso'));
   app.use('/api/usuarios', require('./administracion/usuarios'));
   app.use('/api/proyectos', require('./nucleo/proyectos'));
+  app.use('/api/chat', require('./nucleo/chat'));
   app.use('/api/tareas', require('./produccion/escenas'));
   app.use('/api/entradas', require('./fichaje/entradas'));
   app.use('/api/informes', require('./fichaje/informes'));

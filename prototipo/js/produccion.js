@@ -51,8 +51,15 @@ function estadoInfo(estId, proyId){
 const nomEstado = (estId, proyId) => estadoInfo(estId, proyId).nom;
 const colorEstado = (estId, proyId) => estadoInfo(estId, proyId).color;
 const grupoEstado = (estId, proyId) => estadoInfo(estId, proyId).grupo;
-const esHecha = t => grupoEstado(t.estado, t.proyId)==='completado';
 const primerActivo = proyId => estadosDe(proyId).find(e=>e.grupo==='activo') || estadosDe(proyId)[0];
+const flujoTarea = t => flujoById(t.flujoId || (proyById(t.proyId)||{}).flujoId || 1);
+const estadosDeTarea = t => flujoTarea(t).estados;
+const estadoInfoTarea = t => estadosDeTarea(t).find(e=>e.id===t.estado) || estadoInfo(t.estado, t.proyId);
+const nomEstadoTarea = t => estadoInfoTarea(t).nom;
+const colorEstadoTarea = t => estadoInfoTarea(t).color;
+const grupoEstadoTarea = t => estadoInfoTarea(t).grupo;
+const esHecha = t => grupoEstadoTarea(t)==='completado';
+const primerActivoTarea = t => estadosDeTarea(t).find(e=>e.grupo==='activo') || estadosDeTarea(t)[0];
 function estadosVisibles(){
   if(prodProy) return estadosDe(prodProy);
   const m = new Map();
@@ -82,6 +89,7 @@ function guardaFlujos(){
 const PRIO = {alta:'Alta', media:'Media', baja:'Baja'};
 const ICO_MENU = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>`;
 const ICO_CARPETA = `<svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 6h6l2 2h10v10H3z"/></svg>`;
+const ICO_PERSONAL = `<svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 3h11v18H7z"/><path d="M7 3H5v18h2"/><path d="M11 8h4M11 12h4"/></svg>`;
 const ICO_ESCENA  = `<svg class="ico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16"/></svg>`;
 
 let BLOQUES = [], TAREAS = [], NOTIFS = [], ACTI = [];
@@ -94,9 +102,9 @@ function persistTareas(){
       next: nextTarea,
       tareas: TAREAS.map(t=>({
         id:t.id, proyId:t.proyId, bloqueId:t.bloqueId, titulo:t.titulo, desc:t.desc||'',
-        asignado:uidAsig(t), estado:t.estado, prioridad:t.prioridad, fin:t.fin||'',
+        asignado:uidAsig(t), flujoId:t.flujoId||null, estado:t.estado, prioridad:t.prioridad, fin:t.fin||'',
         creador:t.creador, creado:t.creado,
-        subtareas:t.subtareas||[], comentarios:t.comentarios||[], campos:t.campos||{}
+        comentarios:t.comentarios||[], campos:t.campos||{}
       }))
     }));
   } catch(_){ /* cuota o modo privado */ }
@@ -111,15 +119,124 @@ function recuperaTareas(){
       const t = porId.get(s.id);
       if(t){
         t.titulo = s.titulo; t.desc = s.desc; t.asignado = asig; t.estado = s.estado;
-        t.prioridad = s.prioridad; t.fin = s.fin; t.bloqueId = s.bloqueId; t.proyId = s.proyId;
-        t.subtareas = s.subtareas || []; t.comentarios = s.comentarios || [];
+        t.flujoId = s.flujoId || null; t.prioridad = s.prioridad; t.fin = s.fin; t.bloqueId = s.bloqueId; t.proyId = s.proyId;
+        delete t.subtareas;
+        t.comentarios = s.comentarios || [];
         t.campos = s.campos || t.campos;
       } else {
-        TAREAS.push({...s, asignado:asig, adjuntos:[]});
+        const {subtareas, ...sinSubtareas} = s;
+        TAREAS.push({...sinSubtareas, asignado:asig, adjuntos:[]});
       }
     });
     if(d.next) nextTarea = Math.max(nextTarea, +d.next);
   } catch(_){ /* JSON viejo o corrupto */ }
+}
+function filaEscenaServidor(e){
+  return {
+    id:e.id, proyId:e.proyecto_id, bloqueId:e.carpeta_id, titulo:e.titulo,
+    desc:e.notas||'', asignado:e.asignado_a==null?null:+e.asignado_a,
+    estado:e.estado, prioridad:e.prioridad, fin:e.fecha_entrega||'',
+    creador:e.creador, creado:e.creada, flujoId:e.flujo_id||null,
+    comentarios:(e.comentarios||[]).map(c=>({userId:c.usuario_id, txt:c.texto, ts:c.fecha})),
+    campos:e.campos||{}, adjuntos:[], enServidor:true
+  };
+}
+function guardarTareaServidor(t){
+  if(!t || typeof apiJson!=='function') return Promise.resolve();
+  const cuerpo = JSON.stringify({
+    proyecto_id:t.proyId, carpeta_id:t.bloqueId, titulo:t.titulo, notas:t.desc||'',
+    asignado_a:t.asignado, estado:t.estado, prioridad:t.prioridad,
+    fecha_entrega:t.fin||null, flujo_id:t.flujoId||null
+  });
+  const ok = data=>{
+    if(data && data.escena){
+      t.id = data.escena.id; t.enServidor = true;
+      nextTarea = Math.max(nextTarea, t.id+1);
+    }
+  };
+  if(t.enServidor) return apiJson('/api/tareas/'+t.id, {method:'PUT', body:cuerpo}).catch(()=>{});
+  return apiJson('/api/tareas', {method:'POST', body:cuerpo}).then(ok).catch(()=>{});
+}
+function guardarProyectoServidor(p){
+  if(!p || typeof apiJson!=='function') return;
+  const color = (typeof esColorProyecto==='function' && esColorProyecto(p.color)) ? p.color : '';
+  apiJson('/api/proyectos/'+p.id, {method:'PUT', body:JSON.stringify({
+    nombre:p.nom, cliente:p.cliente, formato:p.formato, estado:p.estado,
+    flujo_id:p.flujoId||1, color, pizarra:p.pizarra||''
+  })}).catch(()=>{});
+}
+function mapaProyectoServidor(sp, previo){
+  const pines = (previo && previo.pines) ? previo.pines : [];
+  return {
+    id:sp.id, nom:sp.nombre, cliente:sp.cliente||'—', formato:sp.formato||'Interno',
+    estado:sp.estado||'curso', presu:sp.horas_presupuestadas||0, inicio:'',
+    entrega:sp.fecha_entrega||'', minPrograma:sp.minutos_programa||0,
+    versiones:sp.versiones||0, equipo:sp.equipo||[], dueno:sp.dueno,
+    flujoId:sp.flujo_id||1, pines, color:sp.color||'',
+    personal:!!sp.personal, pizarra:sp.pizarra||(previo && previo.pizarra)||''
+  };
+}
+function recortaProduccionAjena(){
+  if(typeof recortaProyectosAjenos==='function') recortaProyectosAjenos();
+  const ids = new Set(PROYECTOS.map(p=>p.id));
+  if(typeof BLOQUES!=='undefined'){
+    for(let i=BLOQUES.length-1;i>=0;i--) if(!ids.has(BLOQUES[i].proyId)) BLOQUES.splice(i,1);
+  }
+  if(typeof TAREAS!=='undefined'){
+    for(let i=TAREAS.length-1;i>=0;i--) if(!ids.has(TAREAS[i].proyId)) TAREAS.splice(i,1);
+  }
+  if(typeof ENTRADAS!=='undefined'){
+    for(let i=ENTRADAS.length-1;i>=0;i--) if(!ids.has(ENTRADAS[i].proyId)) ENTRADAS.splice(i,1);
+  }
+  if(prodProy && !ids.has(prodProy)){ prodProy = null; prodCarpeta = null; }
+}
+async function cargarProduccionServidor(){
+  if(typeof apiJson!=='function') return;
+  try{
+    const [fl, pr, ta] = await Promise.all([
+      apiJson('/api/produccion/flujos'),
+      apiJson('/api/proyectos'),
+      apiJson('/api/tareas')
+    ]);
+    if(fl.flujos && fl.flujos.length){
+      FLUJOS = fl.flujos;
+      nextFlujo = Math.max(nextFlujo, ...FLUJOS.map(f=>f.id), 1)+1;
+    }
+    if(pr.proyectos){
+      const vistos = new Set(pr.proyectos.map(sp=>sp.id));
+      for(let i=PROYECTOS.length-1;i>=0;i--){
+        if(vistos.has(PROYECTOS[i].id)) continue;
+        if(PROYECTOS[i].enServidor) PROYECTOS.splice(i,1);
+      }
+      for(const sp of pr.proyectos){
+        let p = PROYECTOS.find(x=>x.id===sp.id);
+        const fila = mapaProyectoServidor(sp, p);
+        fila.enServidor = true;
+        if(!p) PROYECTOS.push(fila);
+        else Object.assign(p, fila, {pines:p.pines||[]});
+        const det = await apiJson('/api/proyectos/'+sp.id);
+        (det.carpetas||[]).forEach(c=>{
+          const b = BLOQUES.find(x=>x.id===c.id);
+          if(b){ b.nom=c.nombre; b.padre=c.padre_id; b.proyId=c.proyecto_id; }
+          else BLOQUES.push({id:c.id, proyId:c.proyecto_id, nom:c.nombre, padre:c.padre_id});
+          nextBloque = Math.max(nextBloque, c.id+1);
+        });
+      }
+    }
+    if(ta.escenas && ta.escenas.length){
+      ta.escenas.forEach(e=>{
+        const fila = filaEscenaServidor(e);
+        const t = TAREAS.find(x=>x.id===e.id);
+        if(t) Object.assign(t, fila, {adjuntos:t.adjuntos||[]});
+        else TAREAS.push(fila);
+        nextTarea = Math.max(nextTarea, e.id+1);
+      });
+    } else {
+      for(const t of TAREAS) await guardarTareaServidor(t);
+    }
+    recortaProduccionAjena();
+    if(typeof aseguraPersonal==='function') aseguraPersonal(ME && ME.id);
+  }catch(_){ /* sin sesión */ }
 }
 function actua(proyId, texto, extra){
   extra = extra || {};
@@ -253,18 +370,23 @@ function pintaCabecera(){
   const det = $('#detWrap');
   if(!tit) return;
   if(sub){ sub.textContent=''; sub.classList.add('hide'); }
-  const enProd = modulo==='produccion' && (vista==='tabla' || vista==='tablero');
+  const enProd = modulo==='produccion' && vista==='tabla';
   const p = enProd && prodProy ? proyById(prodProy) : null;
   if(!p){
-    if(enProd) tit.textContent = TITULOS[vista][0];
+    if(typeof aplicaTemaProyecto==='function'){
+      const adminColor = window.LC && modulo==='fichaje' && vista==='proyectos' ? LC.adminTemaProyecto : null;
+      aplicaTemaProyecto(adminColor || null);
+    }
+    if(enProd) tit.textContent = 'Tareas';
     if(wrap) wrap.classList.add('hide');
     if(det) det.classList.add('hide');
     cierraDetalles();
     return;
   }
+  if(typeof aplicaTemaProyecto==='function') aplicaTemaProyecto(esPersonal(p) ? null : (p.color || null));
   tit.textContent = p.nom;
-  if(det) det.classList.remove('hide');
-  const a = ACTI.find(x=>x.proyId===p.id);
+  if(det) det.classList.toggle('hide', esPersonal(p));
+  const a = !esPersonal(p) && ACTI.find(x=>x.proyId===p.id);
   if(!a || !wrap || !pop){ if(wrap) wrap.classList.add('hide'); }
   else {
     const u = userById(a.userId)||{};
@@ -321,17 +443,14 @@ function abreCarpetasPlantilla(proyId){
     .forEach(b=>exploraCarpetasAbiertas.add(b.id));
 }
 let misQuien = null;        /* inbox de Mis tareas; null = el que está dentro */
-let prodQuien = '';         /* filtro por persona */
-let prodEstado = '';        /* filtro por estado; '' = todos */
-let prodVencidas = false;   /* filtro rápido: solo vencidas */
 let prodBusca = '';         /* texto de búsqueda por título */
 let tareaAbierta = null;
-let seleccion = new Set();  /* ids de escenas seleccionadas en la Tabla, para acciones en lote */
 let carpetaEditando = null; /* id de carpeta en edición de nombre justo tras crearla */
 
 const tareaById  = id => TAREAS.find(t=>t.id===id);
 const bloqueById = id => BLOQUES.find(b=>b.id===id);
 const noLeidas   = () => NOTIFS.filter(n=>n.userId===ME.id && !n.leida);
+const limpiaTxt = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 
 (function semillaProduccion(){
   const carpeta = (proyId, nom, padre=null) => {
@@ -343,13 +462,42 @@ const noLeidas   = () => NOTIFS.filter(n=>n.userId===ME.id && !n.leida);
 
 /* ---- avisos ---- */
 function avisa(userId, texto, tareaId){
-  if(!userId) return;
+  if(!userId || !ME || +userId===ME.id) return;
   NOTIFS.unshift({id:nextNotif++, userId:+userId, texto, tareaId:tareaId||null, ts:Date.now(), leida:false});
   pintaAvisos();
   if(window.LC && LC.guarda && LC.guarda.guardarPronto) LC.guarda.guardarPronto();
 }
+function usuariosMencionados(txt){
+  const tokens = [...new Set([...String(txt||'').matchAll(/@([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9._-]+)/g)]
+    .map(m=>limpiaTxt(m[1].replace(/[.,;:!?)]$/,''))))];
+  if(!tokens.length) return [];
+  return USERS.filter(u=>{
+    const partes = limpiaTxt(u.nom).split(/\s+/).filter(Boolean);
+    const alias = new Set([limpiaTxt(u.user), limpiaTxt(u.ini), ...partes,
+      limpiaTxt(u.nom).replace(/\s+/g,'')]);
+    return tokens.some(t=>alias.has(t));
+  });
+}
+function avisaMenciones(txt, tarea){
+  usuariosMencionados(txt).forEach(u=>{
+    avisa(u.id, `${ME.nom} te ha mencionado en «${tarea.titulo}»`, tarea.id);
+  });
+}
+function tareasUrgentes(uid){
+  return TAREAS.filter(t=>{
+    if(!esAsignadaA(t, uid) || esHecha(t)) return false;
+    const dias = diasHasta(t.fin);
+    return t.prioridad==='alta' || (dias!==null && dias<=0);
+  }).sort((a,b)=>(a.fin||'9').localeCompare(b.fin||'9') || (a.prioridad==='alta'?-1:1));
+}
+function textoUrgencia(t){
+  const dias = diasHasta(t.fin);
+  if(dias!==null && dias<0) return `Urgente: «${t.titulo}» está vencida`;
+  if(dias===0) return `Urgente: «${t.titulo}» vence hoy`;
+  return `Urgente: «${t.titulo}» tiene prioridad alta`;
+}
 function pintaAvisos(){
-  const n = ME ? noLeidas().length : 0;
+  const n = ME ? noLeidas().length + tareasUrgentes(ME.id).length : 0;
   $$('[data-bell-dot]').forEach(d=>{
     d.textContent = n; d.classList.toggle('hide', !n);
   });
@@ -362,14 +510,19 @@ function abrirAvisos(ev){
   const host = $('#popHost');
   if($('#notifPop')){ host.innerHTML=''; return; }
   const mias = NOTIFS.filter(n=>ME && n.userId===ME.id).slice(0,20);
+  const urgentes = ME ? tareasUrgentes(ME.id).slice(0,8) : [];
   host.innerHTML = `<div class="notifpop" id="notifPop">
     <header><span class="lbl">Avisos</span>
       ${mias.some(n=>!n.leida)?'<button class="linkish" id="marcarTodo">Marcar todo como leído</button>':''}</header>
+    ${urgentes.map(t=>`<div class="notif urgente" data-urgent="${t.id}">
+        <span class="pt"></span>
+        <div><div class="tx">${esc(textoUrgencia(t))}</div><div class="tm">${esc(proyById(t.proyId).nom)} · ${esc(nomEstadoTarea(t))}</div></div>
+      </div>`).join('')}
     ${mias.length ? mias.map(n=>`<div class="notif${n.leida?' leida':''}" data-notif="${n.id}">
         <span class="pt"></span>
         <div><div class="tx">${esc(n.texto)}</div><div class="tm">${fCorta(n.ts)} · ${fHora(n.ts)}</div></div>
       </div>`).join('')
-      : '<p class="empty">No tienes avisos.</p>'}</div>`;
+      : (urgentes.length ? '' : '<p class="empty">No tienes avisos.</p>')}</div>`;
   const cerrar = () => host.innerHTML='';
   const mt = $('#marcarTodo');
   if(mt) mt.addEventListener('click', e=>{ e.stopPropagation();
@@ -378,6 +531,9 @@ function abrirAvisos(ev){
     const n = NOTIFS.find(x=>x.id===+el.dataset.notif);
     n.leida = true; cerrar(); pintaAvisos();
     if(n.tareaId){ irModulo('produccion'); go('tabla'); abreTarea(n.tareaId); }
+  }));
+  $$('#notifPop [data-urgent]').forEach(el=>el.addEventListener('click', ()=>{
+    cerrar(); pintaAvisos(); irModulo('produccion'); go('tabla'); abreTarea(+el.dataset.urgent);
   }));
   const pop = $('#notifPop'), btn = ev && ev.currentTarget;
   if(pop && btn){
@@ -390,30 +546,21 @@ function abrirAvisos(ev){
 $('#bell').addEventListener('click', abrirAvisos);
 const bellNav = $('#bellNav');
 if(bellNav) bellNav.addEventListener('click', abrirAvisos);
-function renderAyuda(){
-  const box = $('#ayudaBox');
-  if(box) box.innerHTML = '';
-}
-$('#ayudaBtn').addEventListener('click', ()=>{
-  if(modulo!=='produccion') irModulo('produccion');
-  go('ayuda');
-});
-
 /* ---- barra de filtros compartida ---- */
-function nFiltros(){ return (prodQuien?1:0)+(prodEstado?1:0)+(prodVencidas?1:0); }
 function barraProd(destino, conNueva, conTabla){
   const GRUPOS = {bloque:'Bloque', estado:'Estado', persona:'Asignado',
                   proyecto:'Proyecto', ninguno:'Sin agrupar'};
-  const n = nFiltros();
   destino.innerHTML = `
     <div class="buscaesc">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="fb_${destino.id}" placeholder="Buscar…" value="${esc(prodBusca)}">
     </div>
     <div class="filt-tools">
-      <button type="button" class="btn filtro-btn" id="btnFiltros" aria-pressed="${n>0}">
-        Filtros${n?`<span class="fdot">${n}</span>`:''}</button>
-      ${conTabla?`<div class="seg" id="segVista">
+      ${conTabla?`<div class="seg" id="segModoTareas">
+          <button data-modo="tabla" aria-pressed="${vistaTareas==='tabla'}">Tabla</button>
+          <button data-modo="tablero" aria-pressed="${vistaTareas==='tablero'}">Tablero</button>
+        </div>
+        <div class="seg" id="segVista">
           <button data-v="arbol" aria-pressed="${vistaTabla==='arbol'}">Árbol</button>
           <button data-v="agrupada" aria-pressed="${vistaTabla==='agrupada'}">Agrupada</button>
         </div>
@@ -429,45 +576,18 @@ function barraProd(destino, conNueva, conTabla){
     tBusca = setTimeout(()=>{ prodBusca = v.trim().toLowerCase(); render();
       const el = $(`#fb_${destino.id}`); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 140);
   });
-  $('#btnFiltros').addEventListener('click', ev=>{ ev.stopPropagation(); popFiltros(ev); });
   const g = $(`#fg_${destino.id}`);
   if(g) g.addEventListener('change', e=>{ tablaGrupo = e.target.value; plegados.clear(); render(); });
+  $$('#segModoTareas button').forEach(b=>b.addEventListener('click', ()=>{
+    vistaTareas = b.dataset.modo; render();
+  }));
   $$('#segVista button').forEach(b=>b.addEventListener('click', ()=>{
-    vistaTabla = b.dataset.v; plegados.clear(); seleccion.clear(); render();
+    vistaTabla = b.dataset.v; plegados.clear(); render();
   }));
   const bc = $('#btnCols');
   if(bc) bc.addEventListener('click', ev=>{ ev.stopPropagation(); popColumnas(ev); });
   const nb = $('#nuevaEsc');
   if(nb) nb.addEventListener('click', ev=>{ ev.stopPropagation(); popTiposElem(ev); });
-}
-function popFiltros(ev){
-  const host = $('#popHost');
-  if($('#filtroPop')){ host.innerHTML=''; return; }
-  host.innerHTML = `<div class="filtropop" id="filtroPop">
-    <div class="frow"><div class="lbl">Persona</div>
-      <select id="fqPop"><option value="">Todo el equipo</option>
-        ${USERS.map(u=>`<option value="${u.id}"${String(u.id)===prodQuien?' selected':''}>${esc(u.nom)}</option>`).join('')}</select></div>
-    <div class="frow"><div class="lbl">Estado</div>
-      <select id="fePop"><option value="">Cualquier estado</option>
-        ${estadosVisibles().map(e=>`<option value="${e.id}"${e.id===prodEstado?' selected':''}>${esc(e.nom)}</option>`).join('')}</select></div>
-    <div class="frow">
-      <button type="button" class="btn btn-toggle" id="fvPop" aria-pressed="${prodVencidas}">Solo vencidas</button></div>
-    ${nFiltros()?`<div class="frow"><button type="button" class="linkish" id="fqClear">Quitar filtros</button></div>`:''}
-  </div>`;
-  const pop = $('#filtroPop'), r = pop.getBoundingClientRect(), br = ev.currentTarget.getBoundingClientRect();
-  pop.style.left = Math.max(10, Math.min(br.left, innerWidth-r.width-12))+'px';
-  pop.style.top  = Math.min(br.bottom+6, innerHeight-r.height-12)+'px';
-  const aplica = ()=>{
-    $('#popHost').innerHTML = '';
-    render();
-    const b = $('#btnFiltros');
-    if(b) popFiltros({currentTarget:b});
-  };
-  $('#fqPop').addEventListener('change', e=>{ prodQuien = e.target.value; aplica(); });
-  $('#fePop').addEventListener('change', e=>{ prodEstado = e.target.value; aplica(); });
-  $('#fvPop').addEventListener('click', ()=>{ prodVencidas = !prodVencidas; aplica(); });
-  const qc = $('#fqClear');
-  if(qc) qc.addEventListener('click', ()=>{ prodQuien=''; prodEstado=''; prodVencidas=false; $('#popHost').innerHTML=''; render(); });
 }
 function enRama(bloqueId, raizId){
   if(bloqueId===raizId) return true;
@@ -483,27 +603,29 @@ const tareasVisibles = () => TAREAS.filter(t=>
   puedoVer(proyById(t.proyId)) &&
   (!prodProy || t.proyId===prodProy) &&
   (!prodCarpeta || enRama(t.bloqueId, prodCarpeta)) &&
-  (!prodQuien || esAsignadaA(t, prodQuien)) &&
-  (!prodEstado || t.estado===prodEstado) &&
-  (!prodVencidas || (t.fin && new Date(t.fin+'T23:59') < Date.now() && !esHecha(t))) &&
   (!prodBusca || t.titulo.toLowerCase().includes(prodBusca)));
 
 function nuevaEscena(bloqueIdForzado, opts){
   opts = opts || {};
   const blForzado = bloqueIdForzado!=null ? bloqueById(bloqueIdForzado) : null;
-  const proy = blForzado ? blForzado.proyId : (prodProy || (proyectosMios()[0]||PROYECTOS[0]||{}).id);
+  const proy = blForzado ? blForzado.proyId : (prodProy || (proyectosMios()[0]||{}).id);
   if(!proy){ toast('Elige un proyecto'); return; }
+  if(esPersonal(proyById(proy))){ toast('En Personal se apunta en la pizarra'); return; }
   let bl = blForzado;
   if(!bl) bl = BLOQUES.find(b=>b.proyId===proy && b.nom==='02_ESCENAS')
     || BLOQUES.find(b=>b.proyId===proy);
   if(!bl){ bl = {id:nextBloque++, proyId:proy, nom:'Sin clasificar', padre:null}; BLOQUES.push(bl); }
+  const estadoInicial = opts.estado || primerActivo(proy).id;
+  const flujoDelEstado = FLUJOS.find(f=>f.estados.some(e=>e.id===estadoInicial));
+  const flujoId = flujoDelEstado && !estadosDe(proy).some(e=>e.id===estadoInicial) ? flujoDelEstado.id : null;
   const t = {id:nextTarea++, proyId:proy, bloqueId:bl.id, titulo:opts.titulo || 'Tarea nueva', desc:'',
-    asignado:ME.id, estado:primerActivo(proy).id, prioridad:'media',
-    fin:new Date(HOY.getTime()+3*DAY).toISOString().slice(0,10),
-    creador:ME.id, creado:Date.now(), subtareas:[], comentarios:[], adjuntos:[]};
+    asignado:ME.id, flujoId, estado:estadoInicial, prioridad:'media',
+    fin:fechaISOLocal(sumaDias(hoy(), 3)),
+    creador:ME.id, creado:Date.now(), comentarios:[], adjuntos:[]};
   t.campos = {c_rodaje: t.fin || ''};
   TAREAS.push(t);
   actua(proy, `creó «${t.titulo}»`);
+  guardarTareaServidor(t);
   render();
   if(opts.abrir !== false) abreTarea(t.id, true);
 }
@@ -511,25 +633,28 @@ function nuevaEscena(bloqueIdForzado, opts){
 /* ---- duplicar y borrar escenas (también se usa desde el menú de la fila) ---- */
 function duplicaEscena(id){
   const t = tareaById(id); if(!t) return;
-  const copia = {...t, id:nextTarea++, titulo:t.titulo+' (copia)',
-    subtareas: t.subtareas.map(s=>({...s})), comentarios:[],
+  const {subtareas, ...base} = t;
+  const copia = {...base, id:nextTarea++, titulo:t.titulo+' (copia)',
+    comentarios:[],
     adjuntos:(t.adjuntos||[]).map(a=>({...a})), campos:{...(t.campos||{})},
     creador:ME.id, creado:Date.now()};
   TAREAS.push(copia);
   actua(t.proyId, `duplicó «${t.titulo}»`);
+  copia.enServidor = false;
+  guardarTareaServidor(copia);
   render();
   toast(`«${t.titulo}» duplicada`);
 }
 function borraEscena(id){
   const t = tareaById(id); if(!t) return;
-  const copia = {...t};
+  if(t.enServidor && typeof apiJson==='function') apiJson('/api/tareas/'+id, {method:'DELETE'}).catch(()=>{});
+  const copia = {...t, enServidor:false};
   TAREAS = TAREAS.filter(x=>x.id!==id);
   LC.puente.desenlazarEscena(id);
-  seleccion.delete(id);
   if(tareaAbierta===id) cierraTarea();
   actua(t.proyId, `eliminó «${t.titulo}»`);
   render();
-  toast('Tarea borrada', 'Deshacer', ()=>{ TAREAS.push(copia); render(); });
+  toast('Tarea borrada', 'Deshacer', ()=>{ TAREAS.push(copia); guardarTareaServidor(copia); render(); });
 }
 
 /* ---- carpetas: crear, renombrar, borrar, comprobar parentesco ----
@@ -538,6 +663,7 @@ function borraEscena(id){
 function nuevaCarpeta(padreId, nomForzado){
   const proy = padreId!=null ? (bloqueById(padreId)||{}).proyId : prodProy;
   if(!proy){ toast('Elige un proyecto'); return; }
+  if(esPersonal(proyById(proy))){ toast('En Personal se apunta en la pizarra'); return; }
   const c = {id:nextBloque++, proyId:proy, nom:nomForzado || 'Carpeta nueva', padre:padreId==null?null:padreId};
   BLOQUES.push(c);
   if(padreId!=null) plegados.delete('c'+padreId);
@@ -563,15 +689,11 @@ function pintaBtnTipo(){
 function creaElemento(tipo, nom){
   const n = (nom||'').trim();
   if(tipo==='proyecto'){
-    if(n){
-      const id = Math.max(0, ...PROYECTOS.map(p=>p.id)) + 1;
-      PROYECTOS.push({id, nom:n, cliente:'—', formato:'Serie', estado:'curso',
-        presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0, equipo:[ME.id], dueno:ME.id, flujoId:2, pines:[]});
-      estructuraEstudio(id); abreCarpetasPlantilla(id); initSelects(); eligeProyecto(id); pintaExplora();
-      toast(`«${n}» creado`);
-    } else nuevoProyecto();
+    if(n) creaProyectoEstudio({nom:n, cliente:'—', formato:'Serie', flujoId:2});
+    else nuevoProyecto();
     return;
   }
+  if(esPersonal(proyById(prodProy))){ toast('En Personal se apunta en la pizarra'); return; }
   if(tipo==='carpeta'){
     nuevaCarpeta(prodCarpeta, n || null);
     return;
@@ -647,6 +769,7 @@ const ICO = {
   yo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg>',
   bas: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 7h14M9 7V5h6v2M8 7l1 13h6l1-13"/></svg>',
   est: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>',
+  flujo: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16M4 12h10M4 18h16"/></svg>',
   prio: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4v16M6 4h10l-2 4 2 4H6"/></svg>',
   share: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="6" cy="12" r="2.2"/><circle cx="17" cy="6" r="2.2"/><circle cx="17" cy="18" r="2.2"/><path d="M8 11l7-4M8 13l7 4"/></svg>'
 };
@@ -669,8 +792,12 @@ function menuFila(ev, tipo, id){
       {sep:true},
       {nom:'Asignarme a mí', ico:ICO.yo, on: ()=>{
         if(!esAsignadaA(t, ME.id)){ t.asignado=ME.id; actua(t.proyId, `se asignó «${t.titulo}»`); toast('Te la has asignado · está en Mis tareas'); render(); } }},
-      {nom:'Cambiar estado', ico:ICO.est, sub: estadosDe(t.proyId).map(e=>({
-        nom:e.nom, on:()=>{ if(t.estado!==e.id){ t.estado=e.id; actua(t.proyId, `«${t.titulo}» → ${e.nom}`); avisa(t.asignado, `${ME.nom} ha pasado «${t.titulo}» a ${e.nom}`, t.id); render(); } }
+      {nom:'Cambiar flujo', ico:ICO.flujo, sub: [
+        {nom:'Proyecto · '+flujoDe(t.proyId).nom, on:()=>asignaFlujoTarea(t, null)},
+        ...FLUJOS.map(f=>({nom:f.nom, on:()=>asignaFlujoTarea(t, f.id)}))
+      ]},
+      {nom:'Cambiar estado', ico:ICO.est, sub: estadosDeTarea(t).map(e=>({
+        nom:e.nom, on:()=>{ if(t.estado!==e.id){ t.estado=e.id; actua(t.proyId, `«${t.titulo}» → ${e.nom}`); render(); } }
       }))},
       {nom:'Cambiar prioridad', ico:ICO.prio, sub: Object.entries(PRIO).map(([k,v])=>({
         nom:v, on:()=>{ t.prioridad=k; render(); }
@@ -694,6 +821,18 @@ function menuFila(ev, tipo, id){
       {nom:'Nueva carpeta', ico:ICO.carp, on: ()=>nuevaCarpeta(null)},
       {nom:'Nuevo proyecto', ico:ICO.mas, on: ()=>nuevoProyecto()}
     ];
+  } else if(esPersonal(proyById(id))){
+    items = [
+      {nom:'Abrir', ico:ICO.ojo, on: ()=>eligeProyecto(id)},
+      ...(esMio(proyById(id)) ? [
+        {nom:'Invitar', ico:ICO.share, on: ()=>abreInvitar(id)},
+        {nom:'Color', paleta:true, on: c=>pintaColorProyecto(id, c)}
+      ] : [
+        {nom:'Color', paleta:true, on: c=>pintaColorProyecto(id, c)},
+        {sep:true},
+        {nom:'Salir', ico:ICO.bas, danger:true, on: ()=>saleDelProyecto(id)}
+      ])
+    ];
   } else {
     items = [
       {nom:'Abrir proyecto', ico:ICO.ojo, on: ()=>eligeProyecto(id)},
@@ -703,30 +842,43 @@ function menuFila(ev, tipo, id){
         {sep:true},
         {nom:'Invitar', ico:ICO.share, on: ()=>abreInvitar(id)},
         {nom:'Cambiar nombre', ico:ICO.lapi, on: ()=>renombraProyecto(id)},
-        {nom:'Color', paleta:true, on: c=>{ const p=proyById(id); if(p){ p.color=c; render(); } }},
+        {nom:'Color', paleta:true, on: c=>pintaColorProyecto(id, c)},
         {nom:'Flujo', ico:ICO.est, sub: FLUJOS.map(f=>({
           nom:f.nom, on:()=>asignaFlujo(id, f.id)
         }))}
       ] : [
-        {nom:'Color', paleta:true, on: c=>{ const p=proyById(id); if(p){ p.color=c; render(); } }},
+        {nom:'Color', paleta:true, on: c=>pintaColorProyecto(id, c)},
         {sep:true},
         {nom:'Salir del proyecto', ico:ICO.bas, danger:true, on: ()=>saleDelProyecto(id)}
       ])
     ];
   }
-  host.innerHTML = `<div class="menupop" id="filaPop">${items.map((it,i)=>it.sep
-    ? '<div class="msep"></div>'
-    : it.paleta
-      ? `<div class="mpaleta" data-i="${i}">${PALETA_PROY.map(c=>`<button type="button" data-i="${i}" data-c="${c}" class="${colorProyecto(id)===c?'on':''}" style="background:${c}"></button>`).join('')}</div>`
-      : `<button class="mitem${it.danger?' danger':''}" data-i="${i}">${it.ico||''}<span>${esc(it.nom)}</span>${it.sub?FLE+'<div class="msub">'+
-        it.sub.map((s,j)=>`<button class="mitem" data-i="${i}" data-j="${j}">${esc(s.nom)}</button>`).join('')
-      +'</div>':''}</button>`).join('')}</div>`;
+  host.innerHTML = `<div class="menupop" id="filaPop">${items.map((it,i)=>{
+    if(it.sep) return '<div class="msep"></div>';
+    if(it.paleta){
+      return `<div class="mpaleta" data-i="${i}">${PALETA_PROY.map(c=>`<button type="button" data-i="${i}" data-c="${c}" class="${colorProyecto(id)===c?'on':''}" style="background:${c}"></button>`).join('')}</div>`;
+    }
+    const btn = `<button type="button" class="mitem${it.danger?' danger':''}" data-i="${i}">${it.ico||''}<span>${esc(it.nom)}</span>${it.sub?FLE:''}</button>`;
+    if(!it.sub) return btn;
+    return `<div class="mitem-sub">${btn}<div class="msub">${it.sub.map((s,j)=>
+      `<button type="button" class="mitem" data-i="${i}" data-j="${j}">${esc(s.nom)}</button>`
+    ).join('')}</div></div>`;
+  }).join('')}</div>`;
   const pop = $('#filaPop'), r = pop.getBoundingClientRect();
   let x = ev.clientX, y = ev.clientY;
   if(x + r.width > innerWidth - 12) x = innerWidth - r.width - 12;
-  if(y + r.height > innerHeight - 12) y = innerHeight - r.height - 12;
+  if(y + r.height > innerHeight - 12) y = Math.max(8, innerHeight - r.height - 12);
   pop.style.left = Math.max(8, x)+'px';
   pop.style.top  = Math.max(8, y)+'px';
+  $$('#filaPop .mitem-sub').forEach(wrap=>{
+    const sub = wrap.querySelector('.msub');
+    if(!sub) return;
+    sub.style.display = 'block';
+    sub.style.visibility = 'hidden';
+    if(sub.getBoundingClientRect().right > innerWidth - 8) wrap.classList.add('izq');
+    sub.style.display = '';
+    sub.style.visibility = '';
+  });
   $$('#filaPop [data-i]').forEach(b=>b.addEventListener('click', e=>{
     e.stopPropagation();
     const it = items[+b.dataset.i];
@@ -736,7 +888,12 @@ function menuFila(ev, tipo, id){
       return;
     }
     if(it.sub){
-      if(b.dataset.j==null){ b.classList.add('on'); return; }
+      if(b.dataset.j==null){
+        const wrap = b.closest('.mitem-sub');
+        $$('#filaPop .mitem-sub.on').forEach(el=>{ if(el!==wrap) el.classList.remove('on'); });
+        if(wrap) wrap.classList.toggle('on');
+        return;
+      }
       host.innerHTML=''; it.sub[+b.dataset.j].on(); return;
     }
     host.innerHTML=''; it.on();
@@ -749,13 +906,30 @@ function estructuraEstudio(proyId){
   };
   aplicarPlantillaEstudio(proyId, carpeta);
 }
+function pintaColorProyecto(id, c){
+  const p = proyById(id);
+  if(!p) return;
+  p.color = c;
+  /* El tema solo se ve en el proyecto abierto. Si pintas uno desde el árbol,
+     lo abrimos para que el color no se quede solo en el puntito. */
+  if(prodProy!==id){
+    prodProy = id;
+    prodCarpeta = null;
+    exploraAbiertos.add(id);
+    abreCarpetasPlantilla(id);
+  }
+  if(modulo!=='produccion') irModulo('produccion');
+  if(vista!=='tabla'){ go('tabla'); return; }
+  if(typeof aplicaTemaProyecto==='function') aplicaTemaProyecto(c);
+  render();
+}
 function eligeProyecto(id){
   prodProy = id;
   prodCarpeta = null;
   exploraAbiertos.add(id);
   abreCarpetasPlantilla(id);
   if(modulo!=='produccion') irModulo('produccion');
-  if(vista!=='tabla' && vista!=='tablero') go('tabla');
+  if(vista!=='tabla') go('tabla');
   else render();
 }
 function eligeCarpeta(id){
@@ -767,9 +941,50 @@ function eligeCarpeta(id){
   if(vista!=='tabla') go('tabla');
   else render();
 }
+function creaProyectoEstudio(datos){
+  const local = {
+    id: Math.max(0, ...PROYECTOS.map(p=>p.id)) + 1,
+    nom: datos.nom, cliente: datos.cliente||'—', formato: datos.formato||'Serie',
+    estado:'curso', presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0,
+    equipo:[ME.id], dueno:ME.id, flujoId: datos.flujoId||2, pines:[],
+    personal:false, pizarra:''
+  };
+  const aplica = p=>{
+    initSelects(); eligeProyecto(p.id); pintaExplora();
+    toast(`«${p.nom}» creado`);
+  };
+  if(typeof apiJson==='function'){
+    return apiJson('/api/proyectos', {method:'POST', body:JSON.stringify({
+      nombre:local.nom, cliente:local.cliente, formato:local.formato, estado:'curso',
+      flujo_id:local.flujoId, equipo:[ME.id]
+    })}).then(data=>{
+      if(!data || !data.proyecto) throw new Error('sin proyecto');
+      const p = mapaProyectoServidor(data.proyecto);
+      p.enServidor = true;
+      PROYECTOS.push(p);
+      (data.carpetas||[]).forEach(c=>{
+        BLOQUES.push({id:c.id, proyId:c.proyecto_id, nom:c.nombre, padre:c.padre_id});
+        nextBloque = Math.max(nextBloque, c.id+1);
+      });
+      aplica(p);
+      return p;
+    }).catch(()=>{
+      PROYECTOS.push(local);
+      estructuraEstudio(local.id);
+      abreCarpetasPlantilla(local.id);
+      aplica(local);
+      return local;
+    });
+  }
+  PROYECTOS.push(local);
+  estructuraEstudio(local.id);
+  abreCarpetasPlantilla(local.id);
+  aplica(local);
+  return Promise.resolve(local);
+}
 function nuevoProyecto(){
   $('#modalHost').innerHTML = `<div class="overlay"><div class="modal">
-    <div class="lbl" style="margin-bottom:12px">Nuevo proyecto</div>
+    <h2>Nuevo proyecto</h2>
     <label class="lbl" for="npNom">Nombre</label>
     <div class="row"><input class="field" id="npNom" placeholder="Nombre" autofocus></div>
     <label class="lbl" for="npCli">Cliente</label>
@@ -791,23 +1006,16 @@ function nuevoProyecto(){
   $('#npOk').addEventListener('click', ()=>{
     const nom = $('#npNom').value.trim();
     if(!nom){ $('#npNom').focus(); return; }
-    const id = Math.max(0, ...PROYECTOS.map(p=>p.id)) + 1;
-    PROYECTOS.push({
-      id, nom, cliente: $('#npCli').value.trim() || '—', formato: $('#npFor').value,
-      estado:'curso', presu:0, inicio:'', entrega:'', minPrograma:0, versiones:0, equipo:[ME.id],
-      dueno:ME.id, flujoId: +($('#npFlujo')&&$('#npFlujo').value) || 2, pines:[]
-    });
-    estructuraEstudio(id);
-    abreCarpetasPlantilla(id);
+    const datos = {
+      nom, cliente: $('#npCli').value.trim() || '—', formato: $('#npFor').value,
+      flujoId: +($('#npFlujo')&&$('#npFlujo').value) || 2
+    };
     cierra();
-    initSelects();
-    eligeProyecto(id);
-    pintaExplora();
-    toast(`«${nom}» creado`);
+    creaProyectoEstudio(datos);
   });
 }
 function renombraProyecto(id){
-  const p = proyById(id); if(!p) return;
+  const p = proyById(id); if(!p || esPersonal(p)) return;
   $('#modalHost').innerHTML = `<div class="overlay"><div class="modal">
     <div class="lbl" style="margin-bottom:12px">Renombrar</div>
     <h2>${esc(p.nom)}</h2>
@@ -829,15 +1037,19 @@ let exploraCompAbierto = true;
 function pintaNodoProy(p, {ajeno}={}){
   const flecha = plegado => `<svg class="car2${plegado?' plegado':''}" width="11" height="11" viewBox="0 0 24 24"
     fill="none" stroke="currentColor" stroke-width="2.6"><path d="M9 5l7 7-7 7"/></svg>`;
-  const abierto = exploraAbiertos.has(p.id);
-  const n = TAREAS.filter(t=>t.proyId===p.id && !esHecha(t)).length;
-  const actual = prodProy===p.id && !prodCarpeta;
+  const abierto = !esPersonal(p) && exploraAbiertos.has(p.id);
+  const n = esPersonal(p) ? 0 : TAREAS.filter(t=>t.proyId===p.id && !esHecha(t)).length;
+  const enEste = prodProy===p.id;
+  const actual = enEste && !prodCarpeta;
   const due = userById(duenoDe(p));
-  let html = `<button type="button" class="exitem" data-tipo="proy" data-id="${p.id}" aria-current="${actual}">
-    ${flecha(!abierto)}<i class="dotcat" style="background:${colorProyecto(p.id)}"></i>
+  const marca = esPersonal(p)
+    ? ICO_PERSONAL
+    : `<i class="dotcat" style="background:${colorProyecto(p.id)}"></i>`;
+  let html = `<button type="button" class="exitem${enEste?' enproy':''}${esPersonal(p)?' ex-personal':''}" data-tipo="proy" data-id="${p.id}" aria-current="${actual}">
+    ${esPersonal(p)?'':flecha(!abierto)}${marca}
     <span class="nom">${esc(p.nom)}${ajeno&&due?`<span class="exdue">te invitó ${esc(due.nom.split(' ')[0])}</span>`:''}</span>
     ${n?`<span class="cnt2">${n}</span>`:''}</button>`;
-  if(abierto){
+  if(abierto && !esPersonal(p)){
     const rama = (c, nivel)=>{
       const kids = hijosDe(p.id, c.id);
       const abiertaC = exploraCarpetasAbiertas.has(c.id);
@@ -857,11 +1069,17 @@ function pintaExplora(){
   const caja = $('#explora');
   const cajaComp = $('#exploraComp');
   if(!caja) return;
-  const mios = proyectosMios();
-  const ajenos = proyectosCompartidos();
-  caja.innerHTML = mios.map(p=>{
-    try{ return pintaNodoProy(p); }catch(err){ return ''; }
-  }).join('') || '<p class="exvacio">Aún no hay proyectos tuyos. Pulsa +</p>';
+  const ordenProy = (a,b)=> (esPersonal(b)?1:0)-(esPersonal(a)?1:0) || String(a.nom).localeCompare(b.nom,'es');
+  const mios = proyectosMios().slice().sort(ordenProy);
+  const ajenos = proyectosCompartidos().slice().sort((a,b)=>String(a.nom).localeCompare(b.nom,'es'));
+  const personales = mios.filter(esPersonal);
+  const estudio = mios.filter(p=>!esPersonal(p));
+  const nodo = p => { try{ return pintaNodoProy(p); }catch(err){ return ''; } };
+  caja.innerHTML = [
+    personales.map(nodo).join(''),
+    personales.length && estudio.length ? '<hr class="exsep">' : '',
+    estudio.map(nodo).join('')
+  ].join('') || '<p class="exvacio">Aún no hay proyectos tuyos. Pulsa +</p>';
   if(cajaComp){
     cajaComp.hidden = !exploraCompAbierto;
     cajaComp.innerHTML = exploraCompAbierto
@@ -913,7 +1131,11 @@ function onExploraMenu(ev){
 function saleDelProyecto(id){
   const p = proyById(id); if(!p || esMio(p)) return;
   p.equipo = (p.equipo||[]).filter(u=>u!==ME.id);
+  if(typeof apiJson==='function'){
+    apiJson('/api/proyectos/'+p.id+'/salir', {method:'POST', body:'{}'}).catch(()=>{});
+  }
   if(prodProy===id){ prodProy = null; prodCarpeta = null; }
+  recortaProduccionAjena();
   render();
   toast(`Has salido de «${p.nom}»`);
 }
@@ -963,6 +1185,9 @@ function abreInvitar(proyId){
     });
     const nuevos = p.equipo.filter(id=>!antes.has(id)).length;
     if(nuevos) actua(p.id, `invitó a ${nuevos} persona${nuevos>1?'s':''}`);
+    if(typeof apiJson==='function'){
+      apiJson('/api/proyectos/'+p.id+'/equipo', {method:'PUT', body:JSON.stringify({equipo:p.equipo})}).catch(()=>{});
+    }
     cierra();
     render();
     toast(nuevos ? `Invitación enviada a ${nuevos} persona${nuevos>1?'s':''}` : 'Equipo actualizado');
@@ -993,40 +1218,125 @@ $('#board').addEventListener('contextmenu', ev=>{
   menuFila(ev, 'tarea', +card.dataset.tk);
 });
 
-/* ---- tarjeta del tablero ---- */
+/* ---- tablero por proyecto ---- */
+const ICO_ADJ = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5V7a5 5 0 00-10 0v11a3 3 0 006 0V8"/></svg>';
+const ICO_COM = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14v9H8l-3 3z"/></svg>';
+
+function proyectosTablero(){
+  return [...proyectosMios(), ...proyectosCompartidos()].filter(p=>puedoVer(p));
+}
+function proyectoTableroActual(){
+  const visibles = proyectosTablero();
+  if(prodProy && visibles.some(p=>p.id===prodProy)) return proyById(prodProy);
+  const p = visibles[0] || null;
+  if(p){ prodProy = p.id; prodCarpeta = null; exploraAbiertos.add(p.id); abreCarpetasPlantilla(p.id); }
+  return p;
+}
+function barraTablero(destino, proyId){
+  const visibles = proyectosTablero();
+  destino.innerHTML = `<div class="boardbar">
+    <div class="buscaesc">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="fb_${destino.id}" placeholder="Buscar tarjeta…" value="${esc(prodBusca)}">
+    </div>
+    <div class="filt-tools board-tools">
+      <div class="seg" id="segModoTareas">
+        <button data-modo="tabla" aria-pressed="${vistaTareas==='tabla'}">Tabla</button>
+        <button data-modo="tablero" aria-pressed="${vistaTareas==='tablero'}">Tablero</button>
+      </div>
+      <label class="board-proy">
+        <span>Proyecto</span>
+        <select id="btProy">${visibles.map(p=>
+          `<option value="${p.id}"${p.id===proyId?' selected':''}>${esc(p.nom)}</option>`).join('')}</select>
+      </label>
+      <button class="btn btn-primary" id="btNueva" type="button">Nueva tarea</button>
+    </div>
+  </div>`;
+  let tBusca;
+  $(`#fb_${destino.id}`).addEventListener('input', e=>{
+    clearTimeout(tBusca);
+    const v = e.target.value;
+    tBusca = setTimeout(()=>{ prodBusca = v.trim().toLowerCase(); render();
+      const el = $(`#fb_${destino.id}`); if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 140);
+  });
+  $$('#segModoTareas button').forEach(b=>b.addEventListener('click', ()=>{
+    vistaTareas = b.dataset.modo; render();
+  }));
+  $('#btProy').addEventListener('change', e=>{
+    prodProy = +e.target.value; prodCarpeta = null;
+    exploraAbiertos.add(prodProy); abreCarpetasPlantilla(prodProy);
+    render();
+  });
+  $('#btNueva').addEventListener('click', ()=>nuevaEscena(null, {abrir:true}));
+}
+function tareasTablero(proyId){
+  return TAREAS.filter(t=>
+    t.proyId===proyId &&
+    (!prodBusca || t.titulo.toLowerCase().includes(prodBusca) || (t.desc||'').toLowerCase().includes(prodBusca)));
+}
+function estadosTablero(proyId){
+  const m = new Map(estadosDe(proyId).map(e=>[e.id, e]));
+  tareasTablero(proyId).forEach(t=>{
+    estadosDeTarea(t).forEach(e=>{ if(!m.has(e.id)) m.set(e.id, e); });
+  });
+  return [...m.values()];
+}
+function previewAdjunto(t){
+  const a = (t.adjuntos||[]).find(x=>x.data && ((x.tipo||'').startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(x.nom||'')));
+  return a ? `<div class="tk-img"><img src="${a.data}" alt="${esc(a.nom||'Imagen adjunta')}"></div>` : '';
+}
+function textoCorto(txt, n=118){
+  txt = (txt||'').trim().replace(/\s+/g, ' ');
+  return txt.length > n ? txt.slice(0, n-1).trim()+'…' : txt;
+}
 function htmlTarjeta(t){
-  const u = userById(t.asignado), p = proyById(t.proyId);
-  const dias = t.fin ? Math.ceil((new Date(t.fin+'T23:59')-Date.now())/DAY) : null;
+  const u = userById(t.asignado);
+  const dias = diasHasta(t.fin);
   const tarde = dias!==null && dias<0 && !esHecha(t);
-  const subs = t.subtareas.length ? `${t.subtareas.filter(x=>x.hecha).length}/${t.subtareas.length}` : '';
+  const desc = textoCorto(t.desc);
+  const nAdj = (t.adjuntos||[]).length;
   return `<div class="tk" data-tk="${t.id}" style="--pc:${colorProyecto(t.proyId)}">
+    ${previewAdjunto(t)}
     <div class="tt">${esc(t.titulo)}</div>
+    ${desc?`<p class="tdesc">${esc(desc)}</p>`:''}
     <div class="tm">
       <span class="prio ${t.prioridad}" title="Prioridad ${PRIO[t.prioridad]}"></span>
+      ${t.fin?`<span class="fecha${tarde?' tarde':''}">${tarde?'Vencida · ':''}${fDia(t.fin)}</span>`:''}
+      ${nAdj?`<span class="tkmeta" title="Archivos">${ICO_ADJ}${nAdj}</span>`:''}
+      ${t.comentarios.length?`<span class="tkmeta" title="Comentarios">${ICO_COM}${t.comentarios.length}</span>`:''}
       ${u?htmlAv(u, esc(u.nom)):''}
-      ${t.fin?`<span class="fecha${tarde?' tarde':''}">${tarde?'venció ':''}${new Date(t.fin).toLocaleDateString('es-ES',{day:'2-digit',month:'short'})}</span>`:''}
-      ${subs?`<span title="Subtareas">☑ ${subs}</span>`:''}
-      ${t.comentarios.length?`<span title="Comentarios">💬 ${t.comentarios.length}</span>`:''}
-      ${!prodProy?`<span style="color:${colorProyecto(t.proyId)}">${esc(p.nom.length>16?p.nom.slice(0,15)+'…':p.nom)}</span>`:''}
     </div></div>`;
 }
 function renderTablero(){
-  barraProd($('#barraProd'), true);
-  const ts = tareasVisibles();
+  const p = proyectoTableroActual();
   const b = $('#board');
-  const ests = prodProy ? estadosDe(prodProy) : estadosVisibles();
-  b.style.gridTemplateColumns = `repeat(${Math.max(1,ests.length)}, minmax(212px,1fr))`;
+  if(!p){
+    $('#barraProd2').innerHTML = '';
+    b.style.gridTemplateColumns = '1fr';
+    b.innerHTML = '<p class="empty">Crea un proyecto para montar el tablero.</p>';
+    return;
+  }
+  barraTablero($('#barraProd2'), p.id);
+  const ts = tareasTablero(p.id);
+  const ests = estadosTablero(p.id);
+  b.style.gridTemplateColumns = `repeat(${Math.max(1,ests.length)}, minmax(248px,1fr))`;
   b.innerHTML = ests.map(e=>{
     const col = ts.filter(t=>t.estado===e.id);
-    return `<div class="col" data-col="${e.id}"><h3>
-      <span class="estchip" style="--ec:${e.color}">${esc(e.nom)}</span> <b>${col.length}</b>
-      <button class="colest" data-editest="${e.id}" title="Editar estado">✎</button></h3>
-      <div class="drop">${col.map(htmlTarjeta).join('')}</div></div>`;
+    return `<div class="col" data-col="${e.id}" style="--ec:${e.color}"><h3>
+      <span class="estchip" style="--ec:${e.color}">${esc(e.nom)}</span>
+      <span class="colcount">${col.length}</span>
+      <button class="colest" data-editest="${e.id}" title="Editar estado">${ICO.est}</button></h3>
+      <div class="drop">${col.map(htmlTarjeta).join('')}
+        <button class="board-add" type="button" data-addestado="${e.id}">Añadir tarea</button>
+      </div></div>`;
   }).join('');
   $$('#board [data-editest]').forEach(btn=>btn.addEventListener('click', ev=>{
     ev.stopPropagation();
-    const flujo = prodProy ? flujoDe(prodProy) : flujoById(1);
-    editaEstado(flujo, btn.dataset.editest);
+    editaEstado(FLUJOS.find(f=>f.estados.some(e=>e.id===btn.dataset.editest)) || flujoDe(p.id), btn.dataset.editest);
+  }));
+  $$('#board [data-addestado]').forEach(btn=>btn.addEventListener('click', ev=>{
+    ev.stopPropagation();
+    nuevaEscena(null, {estado:btn.dataset.addestado, abrir:true});
   }));
 }
 
@@ -1034,8 +1344,10 @@ function renderTablero(){
 let arr = null;
 $('#board').addEventListener('pointerdown', ev=>{
   const card = ev.target.closest('[data-tk]'); if(!card || ev.button!==0) return;
+  ev.preventDefault();
   arr = {id:+card.dataset.tk, el:card, x0:ev.clientX, y0:ev.clientY, movido:false, col:null};
   card.setPointerCapture(ev.pointerId);
+  document.body.classList.add('sin-seleccion');
 });
 $('#board').addEventListener('pointermove', ev=>{
   if(!arr) return;
@@ -1049,6 +1361,7 @@ $('#board').addEventListener('pointermove', ev=>{
 $('#board').addEventListener('pointerup', ()=>{
   if(!arr) return;
   const a = arr; arr = null;
+  document.body.classList.remove('sin-seleccion');
   $$('#board .col').forEach(c=>c.classList.remove('over'));
   a.el.classList.remove('arrastrando');
   /* clic simple: abrir la ficha. Se resuelve aquí porque el re-render
@@ -1058,12 +1371,18 @@ $('#board').addEventListener('pointerup', ()=>{
     const t = tareaById(a.id), nuevo = a.col.dataset.col;
     if(t.estado !== nuevo){
       t.estado = nuevo;
-      actua(t.proyId, `«${t.titulo}» → ${nomEstado(nuevo, t.proyId)}`);
-      avisa(t.asignado, `${ME.nom} ha pasado «${t.titulo}» a ${nomEstado(nuevo, t.proyId)}`, t.id);
-      toast(`«${t.titulo}» → ${nomEstado(nuevo, t.proyId)}`);
+      actua(t.proyId, `«${t.titulo}» → ${nomEstadoTarea(t)}`);
+      toast(`«${t.titulo}» → ${nomEstadoTarea(t)}`);
     }
   }
   render();
+});
+$('#board').addEventListener('pointercancel', ()=>{
+  if(!arr) return;
+  arr.el.classList.remove('arrastrando');
+  arr = null;
+  document.body.classList.remove('sin-seleccion');
+  $$('#board .col').forEach(c=>c.classList.remove('over'));
 });
 
 /* ================= TABLA DE ESCENAS (columnas configurables) ================= */
@@ -1076,7 +1395,6 @@ let COLS = [
   {k:'asignado', ancho:190,  nom:'Asignado',      tipo:'persona',  visible:true},
   {k:'prioridad', ancho:122, nom:'Prioridad',     tipo:'prio',     visible:false},
   {k:'fin', ancho:150,       nom:'Entrega',       tipo:'fecha',    visible:false},
-  {k:'progreso', ancho:122,  nom:'Subtareas',     tipo:'progreso', visible:false,  ro:true},
   {k:'horas', ancho:95,     nom:'Horas',         tipo:'horas',    visible:false,  ro:true},
   {k:'bloque', ancho:200,    nom:'Carpeta',       tipo:'bloque',   visible:false},
   {k:'proyecto', ancho:185,  nom:'Proyecto',      tipo:'proyecto', visible:false, ro:true},
@@ -1105,11 +1423,10 @@ const colVisibles = () => COLS.filter(c=>c.visible);
 function valorCol(t, c){
   switch(c.k){
     case 'titulo':   return t.titulo;
-    case 'estado':   return estadosDe(t.proyId).findIndex(e=>e.id===t.estado);
+    case 'estado':   return estadosDeTarea(t).findIndex(e=>e.id===t.estado);
     case 'asignado': return t.asignado ? userById(t.asignado).nom : 'zzz';
     case 'prioridad':return ['alta','media','baja'].indexOf(t.prioridad);
     case 'fin':      return t.fin || '9999';
-    case 'progreso': return t.subtareas.length ? t.subtareas.filter(x=>x.hecha).length/t.subtareas.length : -1;
     case 'horas':    return LC.puente.horasDeEscena(t.id);
     case 'bloque':   return bloqueById(t.bloqueId).nom;
     case 'proyecto': return proyById(t.proyId).nom;
@@ -1119,7 +1436,7 @@ function valorCol(t, c){
 }
 function claveGrupo(t){
   if(tablaGrupo === 'bloque')   return {k:'b'+t.bloqueId, nom:`${proyById(t.proyId).nom} · ${bloqueById(t.bloqueId).nom}`};
-  if(tablaGrupo === 'estado')   return {k:'e'+t.estado,   nom:nomEstado(t.estado, t.proyId)};
+  if(tablaGrupo === 'estado')   return {k:'e'+t.estado,   nom:nomEstadoTarea(t)};
   if(tablaGrupo === 'persona')  return {k:'u'+t.asignado, nom:t.asignado?userById(t.asignado).nom:'Sin asignar'};
   if(tablaGrupo === 'proyecto') return {k:'p'+t.proyId,   nom:proyById(t.proyId).nom};
   return {k:'todo', nom:'Todas'};
@@ -1157,10 +1474,10 @@ function celda(t, c){
         <svg class="exp" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 5l7 7-7 7"/></svg>
         <span class="tx">${esc(t.titulo)}</span></div>`;
     case 'estado': {
-      const c2 = colorEstado(t.estado, t.proyId);
+      const c2 = colorEstadoTarea(t);
       return `<select class="cellctl chipsel" ${at}
         style="color:${c2};background:color-mix(in srgb, ${c2} 13%, transparent);border-color:color-mix(in srgb, ${c2} 26%, transparent)">${
-        estadosDe(t.proyId).map(e=>`<option value="${e.id}"${e.id===t.estado?' selected':''}>${esc(e.nom)}</option>`).join('')}</select>`;
+        estadosDeTarea(t).map(e=>`<option value="${e.id}"${e.id===t.estado?' selected':''}>${esc(e.nom)}</option>`).join('')}</select>`;
     }
     case 'persona': {
       const u = t.asignado ? userById(t.asignado) : null;
@@ -1180,14 +1497,8 @@ function celda(t, c){
         `<option value="${b.id}"${b.id===t.bloqueId?' selected':''}>${esc(b.nom)}</option>`).join('')}</select>`;
     case 'fecha': {
       const v = (c.propia ? ((t.campos||{})[c.k]) : t[c.k]) || '';
-      const tarde = v && new Date(v+'T23:59') < Date.now() && !esHecha(t);
+      const tarde = v && finDelDiaISO(v) < Date.now() && !esHecha(t);
       return `<input type="date" class="cellctl${tarde?' vencida':''}" ${at} value="${v}">`;
-    }
-    case 'progreso': {
-      if(!t.subtareas.length) return '<div class="cellro" style="color:var(--muted)">—</div>';
-      const h = t.subtareas.filter(x=>x.hecha).length, n = t.subtareas.length;
-      return `<div class="miniprog"><span class="bar"><i style="width:${h/n*100}%"></i></span>
-        <span style="color:var(--muted);font-size:11.5px">${h}/${n}</span></div>`;
     }
     case 'horas': {
       const sg = LC.puente.horasDeEscena(t.id);
@@ -1216,6 +1527,7 @@ function celda(t, c){
 
 /* ---- vista de árbol: carpetas anidadas, como el Wrike del estudio ---- */
 let vistaTabla = 'arbol';       /* 'arbol' | 'agrupada' */
+let vistaTareas = 'tabla';      /* 'tabla' | 'tablero' dentro de Tareas */
 
 const tareasDe = (bid, lista) => lista.filter(t=>t.bloqueId===bid);
 /* nº de escenas que cuelgan de una carpeta, contando las subcarpetas */
@@ -1267,13 +1579,12 @@ function pintaArbol(lista, cols){
     if(f.t !== 'proy') num++;
     if(f.t === 'tarea'){
       const t = f.o;
-      return `<tr data-fila="${t.id}" class="${seleccion.has(t.id)?'sel':''}">
-        <td class="numcol"><div class="selstack"><span class="rownum">${num}</span>
-          <input type="checkbox" class="selcb" data-selcb="${t.id}"${seleccion.has(t.id)?' checked':''}></div></td>` +
+      return `<tr data-fila="${t.id}">
+        <td class="numcol">${num}</td>` +
         cols.map((c,i)=>
         i===0
         ? `<td><div class="tname" data-abrir="${t.id}" style="${sangria(f.n)}">
-             ${ICO_ESCENA}<span class="tx">${esc(t.titulo)}</span>${
+             <span class="tcar" aria-hidden="true"></span>${ICO_ESCENA}<span class="tx">${esc(t.titulo)}</span>${
                (t.adjuntos||[]).length?`<svg class="clip" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" title="Adjuntos"><path d="M21 12.5V7a5 5 0 00-10 0v11a3 3 0 006 0V8"/></svg>`:''
              }</div></td>`
         : `<td>${celda(t,c)}</td>`).join('') +
@@ -1300,7 +1611,81 @@ function pintaArbol(lista, cols){
   }).join('');
 }
 
+let huecoObs = null;
+function rellenaHuecoTabla(){
+  const wrap = $('#tablaWrap'), tabla = $('#wtabla');
+  if(!wrap || !tabla || wrap.classList.contains('hide')) return;
+  const tb = tabla.tBodies[0];
+  if(!tb) return;
+  tb.querySelectorAll('tr.fila-hueco').forEach(tr=>tr.remove());
+  const muestra = tb.querySelector('tr');
+  const alto = muestra ? Math.round(muestra.getBoundingClientRect().height) : 38;
+  if(alto < 8) return;
+  const resto = wrap.clientHeight - tabla.offsetHeight;
+  const n = Math.floor(resto / alto);
+  if(n <= 0) return;
+  const nCols = tabla.querySelector('thead tr')?.children.length || 0;
+  if(!nCols) return;
+  const frag = document.createDocumentFragment();
+  for(let i=0;i<n;i++){
+    const tr = document.createElement('tr');
+    tr.className = 'fila-hueco';
+    tr.setAttribute('aria-hidden','true');
+    let html = '';
+    for(let c=0;c<nCols;c++){
+      const cls = c===0 ? ' class="numcol"' : (c===nCols-1 ? ' class="fillcol"' : '');
+      html += `<td${cls}></td>`;
+    }
+    tr.innerHTML = html;
+    frag.appendChild(tr);
+  }
+  tb.appendChild(frag);
+  while(tabla.offsetHeight > wrap.clientHeight){
+    const extra = tb.querySelector('tr.fila-hueco:last-child');
+    if(!extra) break;
+    extra.remove();
+  }
+}
+function observaHuecoTabla(){
+  const wrap = $('#tablaWrap');
+  if(!wrap) return;
+  if(!huecoObs) huecoObs = new ResizeObserver(()=>{ requestAnimationFrame(rellenaHuecoTabla); });
+  huecoObs.disconnect();
+  if(wrap.classList.contains('hide')) return;
+  huecoObs.observe(wrap);
+}
+
 function renderTabla(){
+  const tablaWrap = $('#tablaWrap'), board = $('#board'), elem = $('#elemBar'), pie = $('#tablaPie');
+  const pizarra = $('#pizarraWrap');
+  const vistaEl = $('#v-tabla');
+  const pAct = prodProy ? proyById(prodProy) : null;
+  const personalOn = !!(pAct && esPersonal(pAct));
+  if(vistaEl) vistaEl.classList.toggle('es-pizarra', personalOn);
+  if(pizarra) pizarra.classList.toggle('hide', !personalOn);
+  if(personalOn){
+    if(huecoObs) huecoObs.disconnect();
+    if(tablaWrap) tablaWrap.classList.add('hide');
+    if(elem) elem.classList.add('hide');
+    if(pie) pie.classList.add('hide');
+    if(board){ board.classList.add('hide'); board.innerHTML=''; }
+    if($('#barraProd2')) $('#barraProd2').innerHTML = '';
+    pintaPizarra(pAct);
+    return;
+  }
+  if(vistaTareas === 'tablero'){
+    if(huecoObs) huecoObs.disconnect();
+    if(tablaWrap) tablaWrap.classList.add('hide');
+    if(elem) elem.classList.add('hide');
+    if(pie) pie.classList.add('hide');
+    if(board) board.classList.remove('hide');
+    renderTablero();
+    return;
+  }
+  if(tablaWrap) tablaWrap.classList.remove('hide');
+  if(elem) elem.classList.remove('hide');
+  if(pie) pie.classList.remove('hide');
+  if(board){ board.classList.add('hide'); board.innerHTML=''; }
   barraProd($('#barraProd2'), true, true);
   let ts = tareasVisibles();
   if(tablaOrden.k){
@@ -1312,7 +1697,7 @@ function renderTabla(){
   }
   const cols = colVisibles();
   const arbolOn = vistaTabla === 'arbol';
-  const cab = `<th class="numcol"><input type="checkbox" class="selcb" id="selAll" title="Seleccionar todas"></th>` +
+  const cab = `<th class="numcol"></th>` +
     cols.map(c=>`<th data-col="${c.k}">${esc(c.nom)}${
       tablaOrden.k===c.k ? `<span class="ord">${tablaOrden.dir>0?'▲':'▼'}</span>` : ''
       }<span class="colhandle" data-resize="${c.k}"></span></th>`).join('') +
@@ -1327,6 +1712,7 @@ function renderTabla(){
     e.items.push(t);
   });
 
+  let numG = 0;
   const filas = arbolOn ? pintaArbol(ts, cols) : grupos.map(g=>{
     const plegado = plegados.has(g.k);
     const hechas = g.items.filter(t=>esHecha(t)).length;
@@ -1334,24 +1720,26 @@ function renderTabla(){
       `<tr class="grow${plegado?' plegado':''}" data-grupo="${esc(g.k)}">
         <td colspan="${cols.length+3}"><span class="glab"><span class="car">▼</span> ${esc(g.nom)}
           <span class="cnt">${g.items.length} tareas · ${hechas} hechas</span></span></td></tr>`;
-    const cuerpo = plegado ? '' : g.items.map(t=>
-      `<tr data-fila="${t.id}" class="${seleccion.has(t.id)?'sel':''}">
-        <td class="numcol"><input type="checkbox" class="selcb visible-siempre" data-selcb="${t.id}"${seleccion.has(t.id)?' checked':''}></td>
+    const cuerpo = plegado ? '' : g.items.map(t=>{
+      numG++;
+      return `<tr data-fila="${t.id}">
+        <td class="numcol">${numG}</td>
         ${cols.map(c=>`<td>${celda(t,c)}</td>`).join('')}
         <td><button class="filaMenuBtn" data-menu="tarea:${t.id}" title="Más acciones">${ICO_MENU}</button></td>
-        <td class="fillcol"></td></tr>`).join('');
+        <td class="fillcol"></td></tr>`;
+    }).join('');
     return cab2 + cuerpo;
   }).join('');
 
-  const anchoTotal = cols.reduce((a,c)=>a+(c.ancho||140), 0) + 52 + 40;
-  const cg = `<colgroup><col style="width:52px">${
+  const anchoTotal = cols.reduce((a,c)=>a+(c.ancho||140), 0) + 36 + 40;
+  const cg = `<colgroup><col style="width:36px">${
     cols.map(c=>`<col style="width:${c.ancho||140}px">`).join('')}<col style="width:40px"><col></colgroup>`;
   $('#wtabla').style.width = '100%';
   $('#wtabla').style.minWidth = anchoTotal+'px';
   const hayCuerpo = arbolOn ? filasArbol(ts).length : ts.length;
   $('#wtabla').innerHTML = cg + `<thead><tr>${cab}</tr></thead><tbody>${
-    hayCuerpo ? filas : `<tr><td colspan="${cols.length+3}"><p class="empty">Nada que mostrar. Escribe un nombre abajo y pulsa Añadir.</p></td></tr>`}</tbody>`;
-  $('#tablaPie').textContent = `${ts.length} tareas · ${cols.length} columnas${seleccion.size?` · ${seleccion.size} seleccionada${seleccion.size>1?'s':''}`:''}`;
+    hayCuerpo ? filas : `<tr><td colspan="${cols.length+3}"><p class="empty">Sin tareas todavía. Escribe un nombre abajo y pulsa Añadir.</p></td></tr>`}</tbody>`;
+  $('#tablaPie').textContent = `${ts.length} tarea${ts.length===1?'':'s'} · ${cols.length} columnas`;
 
   /* ---- interacción: ordenar, plegar, abrir ---- */
   $$('#wtabla th[data-col]').forEach(th=>th.addEventListener('click', ev=>{
@@ -1391,30 +1779,12 @@ function renderTabla(){
     } else if(k==='estado'){
       if(el.value !== t.estado){
         t.estado = el.value;
-        actua(t.proyId, `«${t.titulo}» → ${nomEstado(t.estado, t.proyId)}`);
-        avisa(t.asignado, `${ME.nom} ha pasado «${t.titulo}» a ${nomEstado(t.estado, t.proyId)}`, t.id);
+        actua(t.proyId, `«${t.titulo}» → ${nomEstadoTarea(t)}`);
       }
     } else if(k==='bloque'){ t.bloqueId = +el.value;
     } else { t[k] = el.value; }
     render();
   }));
-
-  /* ---- selección múltiple ---- */
-  $$('#wtabla [data-selcb]').forEach(cb=>cb.addEventListener('change', ()=>{
-    const id = +cb.dataset.selcb;
-    cb.checked ? seleccion.add(id) : seleccion.delete(id);
-    render();
-  }));
-  const selAll = $('#selAll');
-  if(selAll){
-    const visibles = ts.map(t=>t.id);
-    selAll.checked = visibles.length>0 && visibles.every(id=>seleccion.has(id));
-    selAll.indeterminate = !selAll.checked && visibles.some(id=>seleccion.has(id));
-    selAll.addEventListener('change', ()=>{
-      visibles.forEach(id=> selAll.checked ? seleccion.add(id) : seleccion.delete(id));
-      render();
-    });
-  }
 
   /* ---- menú de acciones por fila ---- */
   $$('#wtabla [data-menu]').forEach(b=>b.addEventListener('click', ev=>{
@@ -1441,6 +1811,8 @@ function renderTabla(){
     const tr = sp.closest('[data-pleg]');
     if(tr && tr.dataset.tipo==='carpeta'){ carpetaEditando = +tr.dataset.id; render(); }
   }));
+  rellenaHuecoTabla();
+  observaHuecoTabla();
 }
 
 /* ---- arrastrar en el árbol: mover una escena o una carpeta a otro sitio ----
@@ -1451,7 +1823,7 @@ function renderTabla(){
 let dragArbol = null;
 $('#wtabla').addEventListener('pointerdown', ev=>{
   if(vistaTabla!=='arbol' || ev.button!==0) return;
-  if(ev.target.closest('[data-renombra]') || ev.target.closest('.selcb') || ev.target.closest('.filaMenuBtn')) return;
+  if(ev.target.closest('[data-renombra]') || ev.target.closest('.filaMenuBtn')) return;
   const nameEl = ev.target.closest('.tname[data-abrir], .fname');
   if(!nameEl) return;
   let tipo, id, proyId, texto;
@@ -1607,59 +1979,6 @@ document.addEventListener('pointerup', ()=>{
   render();
 });
 
-/* ---- barra de acciones en lote, sobre las escenas seleccionadas en la Tabla ---- */
-function pintaBulk(){
-  const host = $('#bulkHost');
-  [...seleccion].forEach(id=>{ if(!tareaById(id)) seleccion.delete(id); });
-  if(vista!=='tabla' || !seleccion.size){ host.innerHTML=''; return; }
-  const tareasSel = [...seleccion].map(tareaById);
-  const proyUnico = tareasSel.every(t=>t.proyId===tareasSel[0].proyId) ? tareasSel[0].proyId : null;
-  const carpetasDisp = proyUnico ? BLOQUES.filter(b=>b.proyId===proyUnico) : [];
-  host.innerHTML = `<div class="bulkbar">
-    <span><b>${seleccion.size}</b> seleccionada${seleccion.size>1?'s':''}</span>
-    <select id="bkAsig"><option value="">Asignar</option>
-      ${USERS.filter(u=>u.activo).map(u=>`<option value="${u.id}">${esc(u.nom)}</option>`).join('')}
-      <option value="__ninguno">Sin asignar</option></select>
-    <select id="bkEstado"><option value="">Estado</option>
-      ${estadosVisibles().map(e=>`<option value="${e.id}">${esc(e.nom)}</option>`).join('')}</select>
-    <select id="bkCarpeta"${proyUnico?'':' disabled'}>
-      <option value="">Carpeta</option>${carpetasDisp.map(c=>`<option value="${c.id}">${esc(c.nom)}</option>`).join('')}</select>
-    <button class="btn" id="bkCancelar">Cancelar</button>
-    <button class="btn btn-danger" id="bkBorrar">Eliminar</button>
-  </div>`;
-  $('#bkAsig').addEventListener('change', e=>{
-    const v = e.target.value; if(!v) return;
-    const nuevo = v==='__ninguno' ? null : +v;
-    seleccion.forEach(id=>{ const t=tareaById(id); if(!t) return; t.asignado = nuevo;
-      if(nuevo) avisa(nuevo, `${ME.nom} te ha asignado «${t.titulo}» (${proyById(t.proyId).nom})`, t.id); });
-    toast('Asignado');
-    render();
-  });
-  $('#bkEstado').addEventListener('change', e=>{
-    const v = e.target.value; if(!v) return;
-    seleccion.forEach(id=>{ const t=tareaById(id); if(!t || t.estado===v) return;
-      t.estado = v; avisa(t.asignado, `${ME.nom} ha pasado «${t.titulo}» a ${nomEstado(v, t.proyId)}`, t.id); });
-    toast('Estado actualizado');
-    render();
-  });
-  const bc = $('#bkCarpeta');
-  if(proyUnico) bc.addEventListener('change', e=>{
-    const v = e.target.value; if(!v) return;
-    seleccion.forEach(id=>{ const t=tareaById(id); if(t) t.bloqueId = +v; });
-    toast('Movidas');
-    render();
-  });
-  $('#bkCancelar').addEventListener('click', ()=>{ seleccion.clear(); render(); });
-  $('#bkBorrar').addEventListener('click', ()=>{
-    const n = seleccion.size;
-    const copias = [...seleccion].map(id=>({...tareaById(id)}));
-    TAREAS = TAREAS.filter(t=>!seleccion.has(t.id));
-    seleccion.forEach(id=>LC.puente.desenlazarEscena(id));
-    seleccion.clear(); render();
-    toast(`${n} eliminada${n>1?'s':''}`, 'Deshacer', ()=>{ copias.forEach(c=>TAREAS.push(c)); render(); });
-  });
-}
-
 /* ---- selector de columnas ---- */
 function popColumnas(ev){
   const host = $('#popHost');
@@ -1714,19 +2033,30 @@ function popColumnas(ev){
   $('#cnNom').focus();
 }
 
+function encajaEstadoEnFlujo(t, flujo){
+  if(flujo.estados.some(e=>e.id===t.estado)) return;
+  const mapGrupo = {};
+  flujo.estados.forEach(e=>{ if(!mapGrupo[e.grupo]) mapGrupo[e.grupo]=e.id; });
+  const g = grupoEstado(t.estado, t.proyId);
+  t.estado = mapGrupo[g] || (flujo.estados.find(e=>e.grupo==='activo')||flujo.estados[0]).id;
+}
+function asignaFlujoTarea(t, flujoId){
+  if(!t) return;
+  t.flujoId = flujoId || null;
+  encajaEstadoEnFlujo(t, flujoTarea(t));
+  actua(t.proyId, `cambió el flujo de «${t.titulo}» a ${flujoTarea(t).nom}`);
+  toast(flujoTarea(t).nom);
+  if(typeof guardarTareaServidor==='function') guardarTareaServidor(t);
+  render();
+}
 function asignaFlujo(proyId, flujoId){
   const p = proyById(proyId); if(!p) return;
   const flujo = flujoById(flujoId);
   p.flujoId = flujo.id;
-  const mapGrupo = {};
-  flujo.estados.forEach(e=>{ if(!mapGrupo[e.grupo]) mapGrupo[e.grupo]=e.id; });
-  TAREAS.filter(t=>t.proyId===proyId).forEach(t=>{
-    if(flujo.estados.some(e=>e.id===t.estado)) return;
-    const g = grupoEstado(t.estado, null);
-    t.estado = mapGrupo[g] || primerActivo(proyId).id;
-  });
+  TAREAS.filter(t=>t.proyId===proyId && !t.flujoId).forEach(t=>encajaEstadoEnFlujo(t, flujo));
   guardaFlujos();
   toast(flujo.nom);
+  if(typeof guardarProyectoServidor==='function') guardarProyectoServidor(p);
   render();
 }
 function popFlujos(ev){
@@ -1855,6 +2185,16 @@ function renderMisTareas(){
   const uQuien = userById(quien);
   const mias = TAREAS.filter(t=>esAsignadaA(t, quien))
     .sort((a,b)=>(esHecha(a))-(esHecha(b)) || (a.fin||'9').localeCompare(b.fin||'9'));
+  const abiertas = mias.filter(t=>!esHecha(t));
+  const vencidas = abiertas.filter(t=>{
+    const dias = diasHasta(t.fin);
+    return dias!==null && dias<0;
+  });
+  const hoy = abiertas.filter(t=>{
+    const dias = diasHasta(t.fin);
+    return dias===0;
+  });
+  const altas = abiertas.filter(t=>t.prioridad==='alta');
   const barra = $('#barraMis');
   if(ME.rol==='admin'){
     barra.classList.remove('hide');
@@ -1873,20 +2213,40 @@ function renderMisTareas(){
   const vacio = quien===ME.id
     ? 'Nada asignado a ti.'
     : `Nada asignado a ${esc((uQuien||{}).nom||'esta persona')}.`;
-  $('#tablaMis').innerHTML = mias.length ? `<table><thead><tr>
-    <th>Tarea</th><th>Proyecto</th><th>Estado</th><th>Prioridad</th><th class="num">Entrega</th>
-    </tr></thead><tbody>${mias.map(t=>{
-      const dias = t.fin ? Math.ceil((new Date(t.fin+'T23:59')-Date.now())/DAY) : null;
+  $('#tablaMis').innerHTML = mias.length ? `<div class="mis-panel">
+    <div class="mis-resumen">
+      <div class="mis-kpi"><b>${abiertas.length}</b><span>Pendientes</span></div>
+      <div class="mis-kpi"><b>${vencidas.length}</b><span>Vencidas</span></div>
+      <div class="mis-kpi"><b>${hoy.length}</b><span>Hoy</span></div>
+      <div class="mis-kpi"><b>${altas.length}</b><span>Alta prioridad</span></div>
+    </div>
+    <div class="mis-lista">${mias.map(t=>{
+      const dias = diasHasta(t.fin);
       const tarde = dias!==null && dias<0 && !esHecha(t);
-      const ce = colorEstado(t.estado, t.proyId);
-      return `<tr class="trow" data-tk="${t.id}">
-        <td><span class="tt" style="font-weight:600">${esc(t.titulo)}</span></td>
-        <td><span class="pill"><i class="dotcat" style="background:${colorProyecto(t.proyId)}"></i>${esc(proyById(t.proyId).nom)}</span></td>
-        <td><span class="estchip" style="--ec:${ce}">${esc(nomEstado(t.estado, t.proyId))}</span></td>
-        <td><span class="pill"><span class="prio ${t.prioridad}"></span>${PRIO[t.prioridad]}</span></td>
-        <td class="num" style="color:${tarde?'var(--stop)':'var(--muted)'};${tarde?'font-weight:600':''}">
-          ${t.fin?new Date(t.fin).toLocaleDateString('es-ES',{day:'2-digit',month:'short'})
-            +(tarde?' · vencida':(dias===0?' · hoy':'')):'—'}</td></tr>`; }).join('')}</tbody></table>`
+      const ce = colorEstadoTarea(t);
+      const fecha = t.fin ? fDia(t.fin)
+        +(tarde?' · vencida':(dias===0?' · hoy':'')) : 'Sin fecha';
+      const desc = textoCorto(t.desc);
+      const adj = (t.adjuntos||[]).length;
+      return `<article class="mis-card${tarde?' vencida':''}${esHecha(t)?' hecha':''}" data-tk="${t.id}">
+        <div>
+          <div class="mis-line">
+            <span class="estchip" style="--ec:${ce}">${esc(nomEstadoTarea(t))}</span>
+            <span class="pill"><i class="dotcat" style="background:${colorProyecto(t.proyId)}"></i>${esc(proyById(t.proyId).nom)}</span>
+          </div>
+          <h3>${esc(t.titulo)}</h3>
+          ${desc?`<p>${esc(desc)}</p>`:''}
+          <div class="mis-meta">
+            <span>${esc((bloqueById(t.bloqueId)||{}).nom||'Sin carpeta')}</span>
+            ${adj?`<span>${adj} archivo${adj===1?'':'s'}</span>`:''}
+            ${t.comentarios.length?`<span>${t.comentarios.length} comentario${t.comentarios.length===1?'':'s'}</span>`:''}
+          </div>
+        </div>
+        <div class="mis-side">
+          <span class="pill"><span class="prio ${t.prioridad}"></span>${PRIO[t.prioridad]}</span>
+          <span class="mis-fecha${tarde?' vencida':''}">${fecha}</span>
+        </div>
+      </article>`; }).join('')}</div></div>`
     : `<p class="empty">${vacio}</p>`;
   $$('#tablaMis [data-tk]').forEach(el=>el.addEventListener('click', ()=>abreTarea(+el.dataset.tk)));
 }
@@ -1925,13 +2285,18 @@ function ligaSobrenombre(sel, lista){
 }
 function pintaAdjuntos(t){
   const list = adjuntosDe(t);
-  if(!list.length) return '';
-  return list.map(a=>`<div class="adj-row">
+  if(!list.length) return '<p class="adj-empty">Arrastra aquí imágenes, textos, PDFs o archivos del proyecto.</p>';
+  return list.map(a=>{
+    const tipo = (a.tipo||'').split('/')[1] || 'archivo';
+    const img = a.data && ((a.tipo||'').startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(a.nom||''));
+    return `<div class="adj-row${img?' con-img':''}">
+    ${img?`<button type="button" class="adj-thumb" data-ver="${a.id}"><img src="${a.data}" alt="${esc(a.nom)}"></button>`:`<button type="button" class="adj-ico" data-ver="${a.id}">${ICO_ADJ}</button>`}
     <input class="adj-nom" data-ren="${a.id}" value="${esc(a.nom)}">
+    <span class="meta">${esc(tipo)} · ${tamHumano(a.tam||0)}</span>
     <button type="button" class="linkish" data-ver="${a.id}">Ver</button>
-    <span class="meta">${esc((a.tipo||'').split('/')[1]||'archivo')}</span>
     <button type="button" class="icon-btn" data-quita="${a.id}" title="Quitar">✕</button>
-  </div>`).join('');
+  </div>`;
+  }).join('');
 }
 function leeArchivo(file){
   return new Promise((ok, mal)=>{
@@ -1941,6 +2306,13 @@ function leeArchivo(file){
     r.onerror = ()=>mal(new Error('No se ha podido leer.'));
     r.readAsDataURL(file);
   });
+}
+async function adjuntaArchivoTarea(t, id, f){
+  const data = await leeArchivo(f);
+  adjuntosDe(t).push({id:nextAdj++, nom:f.name, archivo:f.name, tipo:f.type||'application/octet-stream', tam:f.size, data});
+  actua(t.proyId, `adjuntó ${f.name} en «${t.titulo}»`);
+  toast(`«${f.name}» adjuntado`);
+  render(); abreTarea(id);
 }
 function cierraVisor(){
   if(visorUrl){ URL.revokeObjectURL(visorUrl); visorUrl = null; }
@@ -2001,8 +2373,13 @@ function abreTarea(id, focoTitulo){
       <button class="icon-btn" id="dCerrar" title="Cerrar" style="color:var(--muted)">✕</button>
     </header>
     <div class="body">
+      <div class="dfield"><span class="k">Flujo</span>
+        <select id="dFlujo">
+          <option value="">Proyecto · ${esc(flujoDe(t.proyId).nom)}</option>
+          ${FLUJOS.map(f=>`<option value="${f.id}"${t.flujoId===f.id?' selected':''}>${esc(f.nom)}</option>`).join('')}
+        </select></div>
       <div class="dfield"><span class="k">Estado</span>
-        <select id="dEstado">${estadosDe(t.proyId).map(e=>
+        <select id="dEstado">${estadosDeTarea(t).map(e=>
           `<option value="${e.id}"${e.id===t.estado?' selected':''}>${esc(e.nom)}</option>`).join('')}</select></div>
       <div class="dfield"><span class="k">Asignado</span>
         <select id="dAsig"><option value="">Sin asignar</option>${USERS.filter(u=>u.activo).map(u=>
@@ -2013,7 +2390,7 @@ function abreTarea(id, focoTitulo){
       <div class="dfield"><span class="k">Entrega</span>
         <input type="date" id="dFin" value="${t.fin||''}"></div>
       <div class="dfield"><span class="k">Proyecto</span>
-        <select id="dProy">${PROYECTOS.map(p=>
+        <select id="dProy">${proyectosVisibles().filter(p=>!esPersonal(p)).map(p=>
           `<option value="${p.id}"${p.id===t.proyId?' selected':''}>${esc(p.nom)}</option>`).join('')}</select></div>
       <div class="dfield"><span class="k">Carpeta</span>
         <select id="dBloque">${BLOQUES.filter(b=>b.proyId===t.proyId).map(b=>
@@ -2025,31 +2402,26 @@ function abreTarea(id, focoTitulo){
 
       <div class="dsec"><h4>Archivos</h4>
         <div class="adj-lista" id="dAdj">${pintaAdjuntos(t)}</div>
-        <div style="display:flex;gap:6px;margin-top:8px">
+        <div class="adj-drop" id="dAdjDrop">
+          <b>Suelta archivos aquí</b>
+          <span>Imágenes, texto, PDF o referencias del montaje.</span>
           <input type="file" id="dAdjFile" class="hide" accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,application/pdf,image/*">
-          <button class="btn btn-sm" type="button" id="dAdjBtn">Adjuntar</button>
+          <button class="btn btn-sm" type="button" id="dAdjBtn">Adjuntar archivo</button>
         </div></div>
 
-      <div class="dsec"><h4>Subtareas</h4>
-        <div id="dSubs">${t.subtareas.map((sx,i)=>`<label class="sub${sx.hecha?' hecha':''}">
-          <input type="checkbox" data-sub="${i}"${sx.hecha?' checked':''}><span>${esc(sx.txt)}</span></label>`).join('')}</div>
-        <form id="dSubForm" style="display:flex;gap:6px;margin-top:8px">
-          <input class="field" id="dSubTxt" placeholder="Añadir subtarea" style="flex:1;padding:6px 9px;font-size:12.5px">
-          <button class="btn btn-sm" type="submit">Añadir</button></form></div>
-
       <div class="dsec"><h4>Horas</h4>
-        ${totalH ? `<div style="font-size:19px;font-weight:500;letter-spacing:-.02em">${hhmm(totalH)} h</div>
+        ${totalH ? `<div style="font-size:20px;font-weight:500;letter-spacing:-.02em">${hhmm(totalH)} h</div>
           <div class="hint2">${Object.entries(porQuien).map(([uid,s])=>
             `${esc(userById(+uid).nom.split(' ')[0])} ${hhmm(s)}`).join(' · ')}</div>`
           : '<p class="hint2" style="margin:0">Sin horas.</p>'}</div>
 
       <div class="dsec"><h4>Comentarios</h4>
         <div id="dComs">${t.comentarios.length ? t.comentarios.map(c=>`<div class="coment">
-          <div class="cw"><span class="av" style="width:20px;height:20px;font-size:8.5px;border-radius:50%;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-weight:700">${esc(userById(c.userId).ini)}</span>
+          <div class="cw"><span class="av" style="width:20px;height:20px;font-size:11px;border-radius:50%;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-weight:700">${esc(userById(c.userId).ini)}</span>
             <b>${esc(userById(c.userId).nom.split(' ')[0])}</b><time>${fCorta(c.ts)} ${fHora(c.ts)}</time></div>
           <div>${esc(c.txt)}</div></div>`).join('') : '<p class="hint2" style="margin:0">Sin comentarios.</p>'}</div>
         <form id="dComForm" style="display:flex;gap:6px;margin-top:10px">
-          <input class="field" id="dComTxt" placeholder="Comentario" style="flex:1;padding:6px 9px;font-size:12.5px">
+          <input class="field" id="dComTxt" placeholder="Comentario" style="flex:1;padding:6px 9px;font-size:13px">
           <button class="btn btn-sm" type="submit">Enviar</button></form></div>
 
       <p class="hint2" style="margin-top:18px">Creada por ${esc(userById(t.creador).nom.split(' ')[0])} el ${fCorta(t.creado)}</p>
@@ -2071,6 +2443,10 @@ function abreTarea(id, focoTitulo){
   $('#dDesc').addEventListener('change', e=>guarda('desc', e.target.value.trim()));
   $('#dPrio').addEventListener('change', e=>guarda('prioridad', e.target.value));
   $('#dBloque').addEventListener('change', e=>guarda('bloqueId', +e.target.value));
+  $('#dFlujo').addEventListener('change', e=>{
+    asignaFlujoTarea(t, e.target.value ? +e.target.value : null);
+    abreTarea(id);
+  });
   $('#dProy').addEventListener('change', e=>{
     const nuevoProy = +e.target.value;
     if(nuevoProy === t.proyId) return;
@@ -2078,6 +2454,7 @@ function abreTarea(id, focoTitulo){
     if(!destino){ destino = {id:nextBloque++, proyId:nuevoProy, nom:'Sin clasificar', padre:null}; BLOQUES.push(destino); }
     t.proyId = nuevoProy;
     t.bloqueId = destino.id;
+    if(!t.flujoId && !estadosDeTarea(t).some(x=>x.id===t.estado)) t.estado = primerActivoTarea(t).id;
     render();
     toast(`Movida a «${proyById(nuevoProy).nom}»`);
     abreTarea(id);  /* refresca la ficha para que «Bloque» muestre las carpetas del nuevo proyecto */
@@ -2085,14 +2462,12 @@ function abreTarea(id, focoTitulo){
   $('#dEstado').addEventListener('change', e=>{
     const v = e.target.value;
     guarda('estado', v, ()=>{
-      actua(t.proyId, `«${t.titulo}» → ${nomEstado(v, t.proyId)}`);
-      avisa(t.asignado, `${ME.nom} ha pasado «${t.titulo}» a ${nomEstado(v, t.proyId)}`, t.id);
+      actua(t.proyId, `«${t.titulo}» → ${nomEstadoTarea(t)}`);
     });
   });
   $('#dFin').addEventListener('change', e=>{
     const v = e.target.value;
-    guarda('fin', v, ()=>avisa(t.asignado,
-      `${ME.nom} ha cambiado la entrega de «${t.titulo}» al ${new Date(v).toLocaleDateString('es-ES')}`, t.id));
+    guarda('fin', v);
   });
   $('#dAsig').addEventListener('change', e=>{
     const v = e.target.value ? +e.target.value : null;
@@ -2103,21 +2478,12 @@ function abreTarea(id, focoTitulo){
       toast(v===ME.id ? 'Asignada' : `Avisado a ${userById(v).nom.split(' ')[0]}`);
     });
   });
-  $$('#dSubs [data-sub]').forEach(c=>c.addEventListener('change', ()=>{
-    t.subtareas[+c.dataset.sub].hecha = c.checked; render(); abreTarea(id);
-  }));
-  $('#dSubForm').addEventListener('submit', ev=>{
-    ev.preventDefault();
-    const v = $('#dSubTxt').value.trim(); if(!v) return;
-    t.subtareas.push({txt:v, hecha:false}); render(); abreTarea(id);
-    $('#dSubTxt').focus();
-  });
   $('#dComForm').addEventListener('submit', ev=>{
     ev.preventDefault();
     const v = $('#dComTxt').value.trim(); if(!v) return;
     t.comentarios.push({userId:ME.id, ts:Date.now(), txt:v});
     actua(t.proyId, `comentó en «${t.titulo}»`);
-    avisa(t.asignado, `${ME.nom} ha comentado en «${t.titulo}»`, t.id);
+    avisaMenciones(v, t);
     render(); abreTarea(id);
     $('#dComTxt').focus();
   });
@@ -2129,12 +2495,24 @@ function abreTarea(id, focoTitulo){
       const f = file.files && file.files[0]; file.value='';
       if(!f) return;
       try{
-        const data = await leeArchivo(f);
-        adjuntosDe(t).push({id:nextAdj++, nom:f.name, archivo:f.name, tipo:f.type||'application/octet-stream', tam:f.size, data});
-        actua(t.proyId, `adjuntó ${f.name} en «${t.titulo}»`);
-        toast(`«${f.name}» adjuntado`);
-        render(); abreTarea(id);
+        await adjuntaArchivoTarea(t, id, f);
       }catch(err){ toast(err.message || 'No se ha podido adjuntar'); }
+    });
+  }
+  const drop = $('#dAdjDrop');
+  if(drop){
+    ['dragenter','dragover'].forEach(tipo=>drop.addEventListener(tipo, ev=>{
+      ev.preventDefault(); drop.classList.add('over');
+    }));
+    ['dragleave','drop'].forEach(tipo=>drop.addEventListener(tipo, ev=>{
+      ev.preventDefault(); drop.classList.remove('over');
+    }));
+    drop.addEventListener('drop', async ev=>{
+      const archivos = [...(ev.dataTransfer && ev.dataTransfer.files || [])];
+      for(const f of archivos){
+        try{ await adjuntaArchivoTarea(t, id, f); }
+        catch(err){ toast(err.message || 'No se ha podido adjuntar'); break; }
+      }
     });
   }
   ligaSobrenombre('#dAdj [data-ren]', adjuntosDe(t));
@@ -2148,6 +2526,182 @@ function abreTarea(id, focoTitulo){
   if(focoTitulo){ $('#dTitulo').focus(); $('#dTitulo').select(); }
 }
 
+function hoyISO(){ return fechaISOLocal(); }
+function fechaLarga(iso){
+  const dt = parseFechaISO(iso) || hoy();
+  const s = dt.toLocaleDateString('es-ES', {weekday:'long', day:'numeric', month:'long'});
+  return s ? s.charAt(0).toUpperCase()+s.slice(1) : (iso||'');
+}
+function ordenaHojas(hojas){
+  return (hojas||[]).slice().sort((a,b)=>{
+    if(a.fecha !== b.fecha) return a.fecha < b.fecha ? 1 : -1;
+    return (b.id||0) - (a.id||0);
+  });
+}
+function parseaPizarra(raw){
+  if(raw && typeof raw === 'object' && Array.isArray(raw.hojas)){
+    return {hojas:raw.hojas, activa:raw.activa||null};
+  }
+  const s = raw == null ? '' : String(raw);
+  const t = s.trim();
+  if(t.startsWith('{')){
+    try{
+      const j = JSON.parse(t);
+      if(j && Array.isArray(j.hojas)) return {hojas:j.hojas, activa:j.activa||null};
+    }catch(e){ /* texto suelto que empieza por { */ }
+  }
+  if(t.startsWith('[')){
+    try{
+      const j = JSON.parse(t);
+      if(Array.isArray(j)) return {hojas:j, activa:j[0] && j[0].id};
+    }catch(e){ /* igual */ }
+  }
+  if(!t) return {hojas:[{id:1, fecha:hoyISO(), texto:''}], activa:1};
+  return {hojas:[{id:1, fecha:hoyISO(), texto:s}], activa:1};
+}
+function hojasDe(p){
+  const pack = parseaPizarra(p && p.pizarra);
+  let hojas = (pack.hojas||[]).map((h,i)=>({
+    id: Number(h && h.id) || (i+1),
+    fecha: (h && h.fecha) || hoyISO(),
+    texto: (h && h.texto) != null ? String(h.texto) : ''
+  }));
+  if(!hojas.length) hojas = [{id:1, fecha:hoyISO(), texto:''}];
+  hojas = ordenaHojas(hojas);
+  let activa = pack.activa != null ? Number(pack.activa) : hojas[0].id;
+  if(!hojas.some(h=>h.id===activa)) activa = hojas[0].id;
+  return {hojas, activa};
+}
+function serializaHojas(hojas, activa){
+  return JSON.stringify({
+    v:1,
+    activa:activa||null,
+    hojas:(hojas||[]).map(h=>({id:h.id, fecha:h.fecha, texto:h.texto||''}))
+  });
+}
+function nextHojaId(hojas){
+  return Math.max(0, ...(hojas||[]).map(h=>h.id||0)) + 1;
+}
+function pilaHojas(hojas, activa){
+  const sel = (hojas||[]).find(h=>h.id===activa) || (hojas||[])[0];
+  if(!sel) return [];
+  const resto = (hojas||[]).filter(h=>h.id!==sel.id);
+  return resto.slice().reverse().concat(sel);
+}
+function textoVisoPizarra(p, gente){
+  const otros = (gente||[]).filter(u=>!ME || u.id!==ME.id);
+  if(esMio(p)){
+    return otros.length
+      ? ('Lo ven también '+otros.map(u=>u.nom.split(' ')[0]).join(', ')+'.')
+      : 'Nadie más puede leer esto.';
+  }
+  return 'Te invitó '+((userById(duenoDe(p))||{}).nom||'alguien')+'.';
+}
+function gentePizarra(p){
+  const ids = [...new Set([duenoDe(p), ...(p.equipo||[])])].filter(Boolean);
+  return ids.map(id=>userById(id)).filter(Boolean);
+}
+function escribePizarra(p, hojas, activa){
+  p.pizarra = serializaHojas(hojas, activa);
+}
+function guardaPizarraPronto(p, marca){
+  if(marca) marca('Guardando…');
+  if(typeof guardarProyectoServidor==='function') guardarProyectoServidor(p);
+  if(LC.guarda) LC.guarda.guardarPronto();
+  if(marca) marca('Guardado · '+new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}));
+}
+function seleccionaHojaPizarra(id){
+  const p = prodProy && proyById(prodProy);
+  if(!esPersonal(p)) return;
+  const pack = hojasDe(p);
+  if(!pack.hojas.some(h=>h.id===id)) return;
+  escribePizarra(p, pack.hojas, id);
+  pintaPizarra(p);
+  const ta = $('#pizarraTxt');
+  if(ta) ta.focus();
+}
+function creaHojaPizarra(){
+  const p = prodProy && proyById(prodProy);
+  if(!esPersonal(p)) return;
+  const pack = hojasDe(p);
+  const id = nextHojaId(pack.hojas);
+  pack.hojas.push({id, fecha:hoyISO(), texto:''});
+  escribePizarra(p, pack.hojas, id);
+  guardaPizarraPronto(p);
+  pintaPizarra(p);
+  const ta = $('#pizarraTxt');
+  if(ta) ta.focus();
+}
+function pintaPizarra(p){
+  const wrap = $('#pizarraWrap');
+  const mazo = $('#pizarraMazo');
+  if(!mazo || !p) return;
+  if(wrap && wrap.dataset.proy !== String(p.id)){
+    wrap.classList.remove('entra');
+    void wrap.offsetWidth;
+    wrap.classList.add('entra');
+    wrap.dataset.proy = p.id;
+  }
+  const pack = hojasDe(p);
+  const raw = p.pizarra == null ? '' : String(p.pizarra);
+  if(!raw.trim().startsWith('{"v":1')) escribePizarra(p, pack.hojas, pack.activa);
+  const gente = gentePizarra(p);
+  const viso = textoVisoPizarra(p, gente);
+  const avsHtml = gente.map(u=>htmlAv(u, esc(u.nom))).join('');
+  const pila = pilaHojas(pack.hojas, pack.activa);
+  const n = pila.length;
+  const firma = p.id+'|'+pila.map(h=>h.id).join(',')+'|'+pack.activa;
+  const sel = pila[pila.length-1];
+  if(wrap.dataset.firma === firma){
+    const visoEl = $('#pizarraViso');
+    const avs = $('#pizarraAvs');
+    const inv = $('#pizarraInvitar');
+    if(visoEl) visoEl.textContent = viso;
+    if(avs) avs.innerHTML = avsHtml;
+    if(inv) inv.classList.toggle('hide', !esMio(p));
+    return;
+  }
+  const stepY = n<=1 ? 0 : Math.max(22, Math.min(30, Math.floor(132/(n-1))));
+  const stepX = n<=1 ? 0 : Math.max(8, Math.min(12, Math.floor(56/(n-1))));
+  mazo.style.setProperty('--n', n);
+  mazo.style.setProperty('--step-y', stepY+'px');
+  mazo.style.setProperty('--step-x', stepX+'px');
+  mazo.innerHTML = pila.map((h,i)=>{
+    const frente = i===n-1;
+    const lab = esc(fechaLarga(h.fecha));
+    const dt = esc(h.fecha||'');
+    if(!frente){
+      return `<article class="pizarra-lamina" data-id="${h.id}" style="--i:${i}" tabindex="0" role="button" aria-label="Abrir hoja del ${lab}">
+        <header class="pizarra-cap"><div class="pizarra-cap-l"><time datetime="${dt}">${lab}</time></div></header>
+      </article>`;
+    }
+    return `<article class="pizarra-lamina es-frente" data-id="${h.id}" style="--i:${i}" aria-current="true">
+      <header class="pizarra-cap">
+        <div class="pizarra-cap-l">
+          <time id="pizarraFecha" datetime="${dt}">${lab}</time>
+          <p id="pizarraViso"></p>
+        </div>
+        <div class="pizarra-cap-r">
+          <div class="pizarra-avs" id="pizarraAvs">${avsHtml}</div>
+          <button type="button" class="btn btn-sm" data-pizarra-nueva>Nueva hoja</button>
+          <button type="button" class="btn btn-sm${esMio(p)?'':' hide'}" id="pizarraInvitar">Invitar</button>
+        </div>
+      </header>
+      <textarea id="pizarraTxt" class="pizarra" placeholder="Notas de montaje, encargos, lo que no entra en un proyecto."></textarea>
+      <p class="pizarra-pie" id="pizarraEstado">Se guarda al escribir</p>
+    </article>`;
+  }).join('');
+  wrap.dataset.firma = firma;
+  const visoEl = $('#pizarraViso');
+  if(visoEl) visoEl.textContent = viso;
+  const ta = $('#pizarraTxt');
+  if(ta && sel){
+    ta.value = sel.texto||'';
+    ta.dataset.proy = p.id;
+    ta.dataset.hoja = sel.id;
+  }
+}
+
 (function arrancaElemBar(){
   const nom = $('#elemNom'), tipo = $('#btnTipoElem'), ok = $('#btnCreaElem');
   if(!nom || !tipo || !ok) return;
@@ -2156,6 +2710,53 @@ function abreTarea(id, focoTitulo){
   const lanza = ()=>{ creaElemento(tipoElem, nom.value); nom.value=''; };
   ok.addEventListener('click', lanza);
   nom.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); lanza(); } });
+})();
+
+(function arrancaPizarra(){
+  const wrap = $('#pizarraWrap');
+  if(!wrap) return;
+  let t;
+  const marca = txt => { const el = $('#pizarraEstado'); if(el) el.textContent = txt; };
+  const pAct = ()=> prodProy && proyById(prodProy);
+  wrap.addEventListener('input', e=>{
+    const ta = e.target.closest && e.target.closest('#pizarraTxt');
+    if(!ta) return;
+    const p = pAct();
+    if(!esPersonal(p)) return;
+    const pack = hojasDe(p);
+    const h = pack.hojas.find(x=>x.id===pack.activa) || pack.hojas[0];
+    if(!h) return;
+    h.texto = ta.value;
+    escribePizarra(p, pack.hojas, h.id);
+    marca('Guardando…');
+    clearTimeout(t);
+    t = setTimeout(()=>guardaPizarraPronto(p, marca), 400);
+  });
+  wrap.addEventListener('click', e=>{
+    if(e.target.closest('[data-pizarra-nueva]')){
+      e.preventDefault();
+      e.stopPropagation();
+      creaHojaPizarra();
+      return;
+    }
+    if(e.target.closest('#pizarraInvitar')){
+      e.stopPropagation();
+      if(typeof abreInvitar==='function') abreInvitar(prodProy);
+      return;
+    }
+    const lam = e.target.closest('.pizarra-lamina');
+    if(lam && !lam.classList.contains('es-frente')){
+      e.preventDefault();
+      seleccionaHojaPizarra(+lam.dataset.id);
+    }
+  });
+  wrap.addEventListener('keydown', e=>{
+    const lam = e.target.closest && e.target.closest('.pizarra-lamina');
+    if(!lam || lam.classList.contains('es-frente')) return;
+    if(e.key!=='Enter' && e.key!==' ') return;
+    e.preventDefault();
+    seleccionaHojaPizarra(+lam.dataset.id);
+  });
 })();
 
 LC.produccion = {

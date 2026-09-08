@@ -1,5 +1,6 @@
 # Lo que lee el NAS si creas el proyecto desde Git.
-# Construye en el NAS con Node de Docker Hub (igual que Wekan). No usa ghcr.io.
+# Construye en el NAS con Node de Docker Hub. No hace falta ghcr.io.
+# Si prefieres pegar YAML (como Wekan), usa NAS.yml.
 
 services:
   fichaje:
@@ -7,22 +8,38 @@ services:
     image: lacorte-fichaje:local
     container_name: La-Corte
     hostname: lacorte
+    init: true
     security_opt:
       - no-new-privileges:true
-    user: 0:0
+    # El volumen del NAS suele ser de root. Sin esto falla
+    # EACCES al escribir fichaje.db y session.secret.
+    user: "0:0"
     ports:
-      - 3001:3000
+      - "3001:3000"
     volumes:
       - /volume1/docker/lacorte/data:/data:rw
     environment:
-      - PUERTO=3000
-      - RUTA_DB=/data/fichaje.db
-      - NODE_ENV=production
-      - COOKIE_SECURE=0
-    restart: on-failure:5
+      PUERTO: "3000"
+      RUTA_DB: /data/fichaje.db
+      NODE_ENV: production
+      COOKIE_SECURE: "0"
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+    stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 40s

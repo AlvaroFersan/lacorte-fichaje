@@ -76,7 +76,11 @@ function migrar(base) {
       fecha_entrega        TEXT,
       minutos_programa     REAL NOT NULL DEFAULT 0,
       versiones            INTEGER NOT NULL DEFAULT 0,
-      color                INTEGER NOT NULL DEFAULT 0
+      color                TEXT NOT NULL DEFAULT '',
+      flujo_id             INTEGER NOT NULL DEFAULT 1,
+      dueno                INTEGER REFERENCES usuarios(id),
+      personal             INTEGER NOT NULL DEFAULT 0,
+      pizarra              TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS proyecto_equipo (
@@ -99,13 +103,13 @@ function migrar(base) {
       titulo         TEXT NOT NULL,
       notas          TEXT NOT NULL DEFAULT '',
       asignado_a     INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-      estado         TEXT NOT NULL DEFAULT 'pendiente'
-                     CHECK (estado IN ('pendiente','curso','revision','hecha')),
+      estado         TEXT NOT NULL DEFAULT 'pendiente',
       prioridad      TEXT NOT NULL DEFAULT 'media'
                      CHECK (prioridad IN ('alta','media','baja')),
       fecha_entrega  TEXT,
       creador        INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-      creada         INTEGER NOT NULL
+      creada         INTEGER NOT NULL,
+      flujo_id       INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS subtareas (
@@ -184,16 +188,123 @@ function migrar(base) {
       valor  TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS flujos (
+      id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      nom   TEXT NOT NULL,
+      desc  TEXT NOT NULL DEFAULT '',
+      fijo  INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS flujo_estados (
+      id       TEXT NOT NULL,
+      flujo_id INTEGER NOT NULL REFERENCES flujos(id) ON DELETE CASCADE,
+      nom      TEXT NOT NULL,
+      grupo    TEXT NOT NULL,
+      color    TEXT NOT NULL,
+      orden    INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (flujo_id, id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_entradas_usuario ON entradas(usuario_id, inicio);
     CREATE INDEX IF NOT EXISTS idx_entradas_proyecto ON entradas(proyecto_id, inicio);
     CREATE INDEX IF NOT EXISTS idx_entradas_escena ON entradas(escena_id);
     CREATE INDEX IF NOT EXISTS idx_escenas_proyecto ON escenas(proyecto_id, carpeta_id);
     CREATE INDEX IF NOT EXISTS idx_sesiones_usuario ON sesiones(usuario_id);
     CREATE INDEX IF NOT EXISTS idx_avisos_usuario ON avisos(usuario_id, leido);
+
+    CREATE TABLE IF NOT EXISTS chat_mensajes (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      de       INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      para     INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      texto    TEXT NOT NULL DEFAULT '',
+      adj_nom  TEXT,
+      adj_tipo TEXT,
+      adj_tam  INTEGER,
+      ts       INTEGER NOT NULL,
+      leido    INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_para ON chat_mensajes(para, id);
+    CREATE INDEX IF NOT EXISTS idx_chat_de ON chat_mensajes(de, id);
   `);
   try {
     base.prepare("UPDATE columnas SET nombre = 'Asignado' WHERE clave = 'asignado' AND nombre = 'Responsable'").run();
   } catch { /* tabla aún vacía */ }
+  migrarEsquema(base);
+}
+
+function columnasDe(base, tabla) {
+  return base.prepare(`PRAGMA table_info(${tabla})`).all().map(c => c.name);
+}
+
+function sqlTabla(base, tabla) {
+  const fila = base.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(tabla);
+  return fila && fila.sql ? fila.sql : '';
+}
+
+function migrarEsquema(base) {
+  const proyCols = columnasDe(base, 'proyectos');
+  if (!proyCols.includes('flujo_id')) {
+    base.exec('ALTER TABLE proyectos ADD COLUMN flujo_id INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!proyCols.includes('dueno')) {
+    base.exec('ALTER TABLE proyectos ADD COLUMN dueno INTEGER REFERENCES usuarios(id)');
+    base.exec("UPDATE proyectos SET dueno = (SELECT id FROM usuarios WHERE rol='admin' ORDER BY id LIMIT 1) WHERE dueno IS NULL");
+  }
+  if (!proyCols.includes('personal')) {
+    base.exec('ALTER TABLE proyectos ADD COLUMN personal INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!proyCols.includes('pizarra')) {
+    base.exec("ALTER TABLE proyectos ADD COLUMN pizarra TEXT NOT NULL DEFAULT ''");
+  }
+
+  const escSql = sqlTabla(base, 'escenas');
+  const escCols = columnasDe(base, 'escenas');
+  const hayCheckViejo = /CHECK\s*\(\s*estado\s+IN/i.test(escSql);
+  if (hayCheckViejo) {
+    base.pragma('foreign_keys = OFF');
+    base.exec(`
+      DROP TABLE IF EXISTS escenas_v2;
+      CREATE TABLE escenas_v2 (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        proyecto_id    INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
+        carpeta_id     INTEGER REFERENCES carpetas(id) ON DELETE SET NULL,
+        titulo         TEXT NOT NULL,
+        notas          TEXT NOT NULL DEFAULT '',
+        asignado_a     INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        estado         TEXT NOT NULL DEFAULT 'pendiente',
+        prioridad      TEXT NOT NULL DEFAULT 'media'
+                       CHECK (prioridad IN ('alta','media','baja')),
+        fecha_entrega  TEXT,
+        creador        INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+        creada         INTEGER NOT NULL,
+        flujo_id       INTEGER
+      );
+      INSERT INTO escenas_v2 (id, proyecto_id, carpeta_id, titulo, notas, asignado_a, estado, prioridad, fecha_entrega, creador, creada)
+      SELECT id, proyecto_id, carpeta_id, titulo, notas, asignado_a, estado, prioridad, fecha_entrega, creador, creada FROM escenas;
+      DROP TABLE escenas;
+      ALTER TABLE escenas_v2 RENAME TO escenas;
+      CREATE INDEX IF NOT EXISTS idx_escenas_proyecto ON escenas(proyecto_id, carpeta_id);
+    `);
+    base.pragma('foreign_keys = ON');
+  } else if (!escCols.includes('flujo_id')) {
+    base.exec('ALTER TABLE escenas ADD COLUMN flujo_id INTEGER');
+  }
+
+  base.exec(`
+    CREATE TABLE IF NOT EXISTS chat_mensajes (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      de       INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      para     INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      texto    TEXT NOT NULL DEFAULT '',
+      adj_nom  TEXT,
+      adj_tipo TEXT,
+      adj_tam  INTEGER,
+      ts       INTEGER NOT NULL,
+      leido    INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_para ON chat_mensajes(para, id);
+    CREATE INDEX IF NOT EXISTS idx_chat_de ON chat_mensajes(de, id);
+  `);
 }
 
 function get() {

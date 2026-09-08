@@ -1,5 +1,7 @@
 # Solo para probar en un PC con Docker Hub. El NAS no usa este archivo.
 # docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# En el PC cambia el volumen: docker-compose.yml apunta a /volume1/... del NAS.
 
 services:
   fichaje:

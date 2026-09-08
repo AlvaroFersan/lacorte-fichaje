@@ -23,9 +23,6 @@ LC.puente = {
   estados: function(){
     return (LC.nucleo && LC.nucleo.estados) ? LC.nucleo.estados() : {};
   },
-  tarifa: function(){
-    return (LC.nucleo && LC.nucleo.tarifa) ? LC.nucleo.tarifa() : {};
-  },
   ajustes: function(){
     return (LC.nucleo && LC.nucleo.ajustes) ? LC.nucleo.ajustes() : {};
   },

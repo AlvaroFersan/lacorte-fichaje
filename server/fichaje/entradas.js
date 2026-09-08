@@ -3,7 +3,7 @@
 
 const express = require('express');
 const db = require('../db');
-const { exigirSesion, puedeVerHorasDe } = require('../lib/permisos');
+const { exigirSesion, puedeVerHorasDe, puedeVerProyecto, idsProyectosVisibles } = require('../lib/permisos');
 
 const router = express.Router();
 router.use(exigirSesion);
@@ -20,6 +20,12 @@ router.get('/', (req, res) => {
     return res.status(403).json({ error: 'Solo puedes ver tus propias horas.' });
   }
 
+  const visibles = idsProyectosVisibles(req.usuario);
+  if (!visibles.length) return res.json({ entradas: [] });
+  if (proyecto && !visibles.includes(proyecto)) {
+    return res.status(404).json({ error: 'No existe ese proyecto.' });
+  }
+
   let sql = 'SELECT * FROM entradas WHERE inicio >= ? AND inicio <= ?';
   const params = [desde, hasta];
   if (req.usuario.rol !== 'admin') {
@@ -29,6 +35,8 @@ router.get('/', (req, res) => {
     sql += ' AND usuario_id = ?';
     params.push(quien);
   }
+  sql += ` AND proyecto_id IN (${visibles.map(() => '?').join(',')})`;
+  params.push(...visibles);
   if (proyecto) {
     sql += ' AND proyecto_id = ?';
     params.push(proyecto);
@@ -45,8 +53,9 @@ router.post('/', (req, res) => {
   if (!proyectoId || !CATS.has(cat) || !inicio || !fin || fin <= inicio) {
     return res.status(400).json({ error: 'Faltan datos del registro (proyecto, tipo, inicio y fin).' });
   }
-  const proy = db.get().prepare('SELECT id FROM proyectos WHERE id = ?').get(proyectoId);
-  if (!proy) return res.status(400).json({ error: 'Ese proyecto no existe.' });
+  if (!puedeVerProyecto(req.usuario, proyectoId)) {
+    return res.status(404).json({ error: 'Ese proyecto no existe.' });
+  }
 
   let escenaId = req.body.escena_id ? Number(req.body.escena_id) : null;
   if (escenaId) {
@@ -83,8 +92,9 @@ router.put('/:id', (req, res) => {
   if (!CATS.has(cat) || !inicio || !fin || fin <= inicio) {
     return res.status(400).json({ error: 'Inicio y fin no son válidos.' });
   }
-  const proy = db.get().prepare('SELECT id FROM proyectos WHERE id = ?').get(proyectoId);
-  if (!proy) return res.status(400).json({ error: 'Ese proyecto no existe.' });
+  if (!puedeVerProyecto(req.usuario, proyectoId)) {
+    return res.status(404).json({ error: 'Ese proyecto no existe.' });
+  }
   let escenaId = req.body.escena_id != null && req.body.escena_id !== ''
     ? Number(req.body.escena_id) : e.escena_id;
   if (escenaId) {
@@ -103,6 +113,9 @@ router.delete('/:id', (req, res) => {
   if (!e) return res.status(404).json({ error: 'No existe ese registro.' });
   if (!puedeVerHorasDe(req.usuario, e.usuario_id) || (req.usuario.rol !== 'admin' && e.usuario_id !== req.usuario.id)) {
     return res.status(403).json({ error: 'No puedes borrar el registro de otra persona.' });
+  }
+  if (!puedeVerProyecto(req.usuario, e.proyecto_id)) {
+    return res.status(404).json({ error: 'No existe ese registro.' });
   }
   db.get().prepare('DELETE FROM entradas WHERE id = ?').run(e.id);
   res.json({ ok: true, entrada: e });

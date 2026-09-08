@@ -29,5 +29,6 @@ else
 fi
 
 chmod 777 data 2>/dev/null || true
-echo "Listo. En el PC: npm start o docker compose. El NAS usa GitHub + docker-compose.yml."
-echo "En el navegador: http://localhost:3000  (o IP-DEL-NAS:3000)"
+echo "Listo. En el PC: npm start. El NAS pega NAS.yml en Container Manager (docs/NAS.md)."
+echo "En el PC: http://localhost:3000"
+echo "En el NAS (Docker): http://IP-DEL-NAS:3001"
