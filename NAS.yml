@@ -9,7 +9,7 @@ services:
     hostname: lacorte
     security_opt:
       - no-new-privileges:true
-    user: 1026:100
+    user: 0:0
     ports:
       - 3000:3000
     volumes:

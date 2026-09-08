@@ -34,7 +34,7 @@ services:
     hostname: lacorte
     security_opt:
       - no-new-privileges:true
-    user: 1026:100
+    user: 0:0
     ports:
       - 3000:3000
     volumes:
@@ -63,6 +63,9 @@ Tiene una **s**: `alvarofersan`.
 
 Si da error `Head "https://ghcr.io/v2/..."`, revisa que no se haya pegado la
 ruta vieja sin la `s`.
+
+Si da error `EACCES: permission denied, open '/data/session.secret'`, revisa
+que el YAML tenga `user: 0:0`. Eso permite escribir en la carpeta `data`.
 
 ## Puerto ocupado
 
