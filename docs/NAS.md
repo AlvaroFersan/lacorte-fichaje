@@ -22,7 +22,7 @@ Ahí se guardan la base de datos y las sesiones. No la borres al actualizar.
 4. Elige **Configuraciones de YAML**.
 5. Pega entero el contenido de `NAS.yml`.
 6. Crear / Iniciar.
-7. Cuando esté en verde, abre: `http://IP-DEL-NAS:3000`.
+7. Cuando esté en verde, abre: `http://IP-DEL-NAS:3001`.
 
 ## YAML para copiar
 
@@ -36,7 +36,7 @@ services:
       - no-new-privileges:true
     user: 0:0
     ports:
-      - 3000:3000
+      - 3001:3000
     volumes:
       - /volume1/docker/lacorte/data:/data:rw
     environment:
@@ -69,11 +69,11 @@ que el YAML tenga `user: 0:0`. Eso permite escribir en la carpeta `data`.
 
 ## Puerto ocupado
 
-Si el puerto 3000 ya se usa, cambia solo el número de la izquierda:
+Si el puerto 3001 ya se usa, cambia solo el número de la izquierda:
 
-`3001:3000`
+`3002:3000`
 
-Entonces se abre con `http://IP-DEL-NAS:3001`.
+Entonces se abre con `http://IP-DEL-NAS:3002`.
 
 ## Licencia
 

@@ -11,7 +11,7 @@ services:
       - no-new-privileges:true
     user: 0:0
     ports:
-      - 3000:3000
+      - 3001:3000
     volumes:
       - /volume1/docker/lacorte/data:/data:rw
     environment:

@@ -55,7 +55,7 @@ Como Wekan: Container Manager -> Proyecto -> Crear -> **Configuraciones de YAML*
 Pega el contenido de **[NAS.yml](NAS.yml)**. Guía paso a paso:
 **[docs/NAS.md](docs/NAS.md)**.
 
-Luego: `http://IP-DEL-NAS:3000`.
+Luego: `http://IP-DEL-NAS:3001`.
 Las cuentas las da el administrador del estudio.
 
 ---
