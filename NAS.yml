@@ -1,9 +1,10 @@
-# Pega esto en Container Manager DESPUÉS de tener la imagen en el NAS
-# (proyecto desde Git, o el Programador de tareas). No usa ghcr.io.
+# Copiar y pegar entero en Synology Container Manager.
+# Proyecto -> Crear -> Configuraciones de YAML.
+# Antes crea en File Station: docker/lacorte/data
 
 services:
   fichaje:
-    image: lacorte-fichaje:local
+    image: ghcr.io/alvarofersan/lacorte-fichaje:latest
     container_name: La-Corte
     hostname: lacorte
     security_opt:

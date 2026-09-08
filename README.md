@@ -51,14 +51,11 @@ se vuelve a crear esa base limpia.
 
 ## Montar en el NAS
 
-Synology no baja imágenes de GitHub (`ghcr.io`). Hay que crear el **proyecto
-desde Git** (no pegar el YAML viejo). Guía: **[docs/NAS.md](docs/NAS.md)**.
+Como Wekan: Container Manager -> Proyecto -> Crear -> **Configuraciones de YAML**.
+Pega el contenido de **[NAS.yml](NAS.yml)**. Guía paso a paso:
+**[docs/NAS.md](docs/NAS.md)**.
 
-URL:
-
-`https://github.com/AlvaroFersan/lacorte-fichaje.git`
-
-Rama `main`. Luego: `http://IP-DEL-NAS:3000`.
+Luego: `http://IP-DEL-NAS:3000`.
 Las cuentas las da el administrador del estudio.
 
 ---

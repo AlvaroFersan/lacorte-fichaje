@@ -1,54 +1,35 @@
 # Cómo montar La Corte en el NAS
 
-Synology **no sabe bajar imágenes de GitHub** (`ghcr.io`). Por eso fallaba el YAML
-anterior. Wekan funciona porque usa Docker Hub. La Corte se monta de una de
-estas dos formas.
+Es igual que el ejemplo de Wekan: se pega un YAML en Container Manager y el NAS
+descarga la imagen automáticamente.
 
-Las cuentas de acceso no están escritas aquí. Las da quien administra el estudio.
+No hay `.bat`. No hay que clonar el repo. No hay que añadir registro si la imagen
+está pública.
 
-Antes, en File Station, crea: `docker` → `lacorte` → `data`
-(ruta: `/volume1/docker/lacorte/data`).
+## Paso 1. Crear carpeta de datos
 
----
+En File Station crea esta carpeta:
 
-## Forma 1 (la buena): proyecto desde Git
+`/volume1/docker/lacorte/data`
 
-Container Manager construye la app en el NAS. Node lo baja de Docker Hub,
-como Wekan.
+Ahí se guardan la base de datos y las sesiones. No la borres al actualizar.
 
-1. Container Manager → **Proyecto** → **Crear**.
+## Paso 2. Crear proyecto con YAML
+
+1. Container Manager -> Proyecto -> Crear.
 2. Nombre: `lacorte`.
-3. Origen: **repositorio Git** (no «Configuraciones de YAML»).
-4. URL:
+3. Ruta del proyecto: la que quieras, por ejemplo `/volume1/docker/projects/lacorte`.
+4. Elige **Configuraciones de YAML**.
+5. Pega entero el contenido de `NAS.yml`.
+6. Crear / Iniciar.
+7. Cuando esté en verde, abre: `http://IP-DEL-NAS:3000`.
 
-   `https://github.com/AlvaroFersan/lacorte-fichaje.git`
-
-5. Rama: `main`.
-6. Tiene que usar `docker-compose.yml`.
-7. Crear / iniciar y **espera 2–5 minutos** (compila). No es instantáneo.
-8. Contenedor `La-Corte` en verde → `http://IP-DEL-NAS:3000`
-
----
-
-## Forma 2: si solo puedes pegar YAML
-
-Primero hay que dejar la imagen **dentro** del NAS. Panel de control →
-**Programador de tareas** → Crear → Tarea programada → **Script definido por el usuario**.
-
-Usuario: `root`. Marca «Ejecutar como root» si sale. En el script, **una sola línea**
-(cambia `PEGA_EL_TOKEN` por el `ghp_...` de GitHub, `read:packages`):
-
-```sh
-/usr/local/bin/docker login ghcr.io -u AlvaroFersan -p PEGA_EL_TOKEN && /usr/local/bin/docker pull ghcr.io/alvaroferan/lacorte-fichaje:latest && /usr/local/bin/docker tag ghcr.io/alvaroferan/lacorte-fichaje:latest lacorte-fichaje:local
-```
-
-Ejecutar ahora. Cuando termine sin error, en Container Manager → Proyecto →
-Crear → **Configuraciones de YAML** y pega:
+## YAML para copiar
 
 ```yaml
 services:
   fichaje:
-    image: lacorte-fichaje:local
+    image: ghcr.io/alvarofersan/lacorte-fichaje:latest
     container_name: La-Corte
     hostname: lacorte
     security_opt:
@@ -64,22 +45,32 @@ services:
       - NODE_ENV=production
       - COOKIE_SECURE=0
     restart: on-failure:5
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/salud').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 ```
 
-Ese YAML **ya no habla con GitHub**. Usa la imagen que acaba de bajar el programador.
+## Importante
 
----
+La imagen correcta es:
 
-## Si algo no va
+`ghcr.io/alvarofersan/lacorte-fichaje:latest`
 
-| Qué ves | Qué mirar |
-|---|---|
-| Head ghcr.io / fichaje Error | Estás pegando el YAML viejo. Usa la forma 1 (Git) o la 2 (imagen local). |
-| El registro ghcr.io no hace nada | Normal. Synology no lista GitHub. No hace falta ese registro. |
-| Build tarda | Normal la primera vez. Mira los registros; tiene que acabar en Running. |
-| Aviso «no segura» | Normal: es `http`. En la oficina se ignora. |
+Tiene una **s**: `alvarofersan`.
 
----
+Si da error `Head "https://ghcr.io/v2/..."`, revisa que no se haya pegado la
+ruta vieja sin la `s`.
+
+## Puerto ocupado
+
+Si el puerto 3000 ya se usa, cambia solo el número de la izquierda:
+
+`3001:3000`
+
+Entonces se abre con `http://IP-DEL-NAS:3001`.
 
 ## Licencia
 
