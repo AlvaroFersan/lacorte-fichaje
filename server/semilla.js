@@ -74,7 +74,7 @@ async function sembrarSiVacia() {
     gestion: 45, asis: 28, montaje: 42
   }));
 
-  logea('Sistema', 'Base lista: alvaro y jesus (admin), proyecto Interno. Clave inicial 1234; cámbiala.');
+  logea('Sistema', 'Base lista: administradores y proyecto Interno. Cambia las claves al entrar.');
   return { sembrado: true };
 }
 

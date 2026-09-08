@@ -31,4 +31,3 @@ fi
 chmod 777 data 2>/dev/null || true
 echo "Listo. En el PC: npm start o docker compose. El NAS usa GitHub + docker-compose.yml."
 echo "En el navegador: http://localhost:3000  (o IP-DEL-NAS:3000)"
-echo "Cuentas: alvaro / 1234  y  jesus / 1234"

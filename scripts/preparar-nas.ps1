@@ -29,4 +29,4 @@ if ($texto -match 'cambia-esta-frase-por-una-aleatoria-larga') {
 
 Write-Host 'Listo para probar en este PC.'
 Write-Host 'El NAS entra por GitHub + docker-compose.yml (docs/NAS.md).'
-Write-Host 'Navegador local: http://localhost:3000  (alvaro / 1234)'
+Write-Host 'Navegador local: http://localhost:3000'

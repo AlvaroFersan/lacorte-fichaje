@@ -40,8 +40,8 @@ npm start
 ```
 
 Abre [http://localhost:3000](http://localhost:3000).
+Las cuentas las da el administrador del estudio; no se publican aquí.
 
-Cuentas: `alvaro` / `1234` y `jesus` / `1234` (los dos admin).
 Un proyecto vacío: **Interno**. Sin horas ni tareas de mentira.
 
 La base de datos aparece en `data/fichaje.db`. Si la borras y reinicias,
@@ -49,11 +49,17 @@ se vuelve a crear esa base limpia.
 
 ---
 
-## NAS (GitHub, no un .bat)
+## Montar en el NAS
 
-El NAS clona este repo y lee **`docker-compose.yml`**. GitHub publica la
-imagen (`.github/workflows/imagen-nas.yml`). Pasos en `docs/NAS.md`.
-Puerto **3000**.
+Guía completa, paso a paso (Synology y QNAP): **[docs/NAS.md](docs/NAS.md)**.
+
+Resumen: en Container Manager (o Container Station) crea un **proyecto desde Git**
+con esta URL:
+
+`https://github.com/AlvaroFersan/lacorte-fichaje.git`
+
+Rama `main`. Tiene que leer `docker-compose.yml`. Luego, en un PC de la oficina:
+`http://IP-DEL-NAS:3000`.
 
 ---
 

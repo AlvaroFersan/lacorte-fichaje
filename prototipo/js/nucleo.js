@@ -458,8 +458,10 @@ $('#loginForm').addEventListener('submit', ev=>{
 });
 $$('[data-quick]').forEach(b=>b.addEventListener('click', ()=>{
   const u = USERS.find(x=>x.user===b.dataset.quick);
-  $('#u').value = u.user; $('#p').value = '1234';
-  intentaLogin(u, '1234');
+  if(!u) return;
+  $('#u').value = u.user;
+  $('#p').value = '';
+  $('#p').focus();
 }));
 
 /* ---- segundo factor ---- */
@@ -599,7 +601,8 @@ function entra(u){
   if(window.LC && LC.guarda && LC.guarda.listo){
     LC.guarda.listo.then(()=>{ if(ME && typeof render==='function') render(); });
   }
-  const clave = ($('#p').value||'').trim() || '1234';
+  const clave = ($('#p').value||'').trim();
+  if(!clave) return;
   fetch('/api/acceso/entrar', {
     method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'},

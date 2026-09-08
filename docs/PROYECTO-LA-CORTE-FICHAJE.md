@@ -90,9 +90,9 @@ la criptografía están escritos a mano en el propio archivo.
 Archivo único autocontenido: `lacorte-fichaje-prototipo.html` (~188 KB). Se abre con doble
 clic, sin instalar nada. **Los datos viven en memoria: al recargar, vuelve al estado inicial.**
 
-Credenciales: `alvaro` / `1234` y `jesus` / `1234` (los dos admin). Cámbialas en el estudio.
-Hay botones de acceso rápido en la pantalla de entrada.
-*(Son credenciales de demostración. No reutilizarlas en producción.)*
+Las cuentas de acceso las da el administrador del estudio. No se publican
+en este documento. Hay botones de acceso rápido en la pantalla de entrada
+del prototipo (solo en local).
 
 ### 4.1 Acceso y seguridad — hecho
 

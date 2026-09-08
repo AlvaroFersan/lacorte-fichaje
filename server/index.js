@@ -168,7 +168,7 @@ async function main() {
     console.log(`La Corte Fichaje escuchando en http://localhost:${PUERTO}`);
     console.log(`Base de datos: ${db.rutaDb()}`);
     if (semilla.sembrado) {
-      console.log('Primera arrancada: alvaro y jesus (admin), clave 1234. Cámbiala antes del NAS.');
+      console.log('Primera arrancada: hay cuentas de administrador. Las claves no se publican; cámbialas al entrar.');
     }
   });
 

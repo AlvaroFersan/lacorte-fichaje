@@ -71,7 +71,7 @@ $('#loginForm').addEventListener('submit', async ev => {
       body: JSON.stringify({ usuario: $('#u').value, clave: $('#p').value })
     });
     if (data.necesita_mfa || data.necesita_alta_mfa) {
-      errLogin('Esta cuenta tiene (o exige) doble factor. El alta del 2FA en esta pantalla llega en el siguiente paso; de momento entra con una cuenta sin 2FA, como alvaro / 1234.');
+      errLogin('Esta cuenta tiene (o exige) doble factor. El alta del 2FA en esta pantalla llega en el siguiente paso.');
       return;
     }
     mostrar(data.usuario);
@@ -92,7 +92,6 @@ $('#btnSalir').addEventListener('click', async () => {
   b.textContent = u;
   b.addEventListener('click', () => {
     $('#u').value = u;
-    $('#p').value = '1234';
   });
   $('#quicks').appendChild(b);
 });
